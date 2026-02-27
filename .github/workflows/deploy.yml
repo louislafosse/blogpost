@@ -34,9 +34,6 @@ jobs:
 
       - name: Build
         run: deno task build
-        env:
-          # Set to your repo name, e.g. /bishop-project/
-          VITE_BASE_PATH: /${{ github.event.repository.name }}/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
