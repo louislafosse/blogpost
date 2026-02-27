@@ -37,7 +37,7 @@ export const TagsPage: React.FC = () => {
       {/* Fixed background — light */}
       <Box sx={{
         position: "fixed", top: 0, left: 0, width: "100%", height: "100vh",
-        backgroundImage: "url(/orig1.png)", backgroundSize: "cover",
+        backgroundImage: `url(${import.meta.env.BASE_URL}orig1.png)`, backgroundSize: "cover",
         backgroundRepeat: "no-repeat", backgroundPosition: "center 10%",
         zIndex: 0,
         transform: isDarkMode ? "scale(1)" : "scale(1.05)",
@@ -47,7 +47,7 @@ export const TagsPage: React.FC = () => {
       {/* Fixed background — dark */}
       <Box sx={{
         position: "fixed", top: 0, left: 0, width: "100%", height: "100vh",
-        backgroundImage: "url(/dark_theme.png)", backgroundSize: "cover",
+        backgroundImage: `url(${import.meta.env.BASE_URL}dark_theme.png)`, backgroundSize: "cover",
         backgroundRepeat: "no-repeat", backgroundPosition: "center top",
         zIndex: 1,
         opacity: isDarkMode ? 1 : 0,
