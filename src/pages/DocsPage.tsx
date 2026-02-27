@@ -330,8 +330,8 @@ export const DocsPage: React.FC = () => {
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5, mb: 0.5 }}>
             <Box
-              component="a"
-              href={author ? `/author/${author.slug}` : '#'}
+              component={RouterLink}
+              to={author ? `/author/${author.slug}` : '/'}
               sx={{
                 display: 'flex', alignItems: 'center', gap: '12px',
                 color: 'inherit', textDecoration: 'none',
