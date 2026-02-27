@@ -221,7 +221,7 @@ export const AuthorPage: React.FC = () => {
                   </Box>
                 )}
                 {author.email && (
-                  <Box component="a" href={`mailto:${author.email}`} sx={{
+                  <Box component="a" href={`mailto:${author.email}`} target="_blank" rel="noreferrer" sx={{
                     fontFamily: "'Fira Code', monospace", color: ink, textDecoration: "none",
                     fontSize: "0.8rem", letterSpacing: "0.08em",
                     borderBottom: `1px solid ${ink}`, pb: "2px",
@@ -232,7 +232,7 @@ export const AuthorPage: React.FC = () => {
                   </Box>
                 )}
                 {author.links?.map(link => (
-                  <Box key={link.label} component="a" href={link.url} sx={{
+                  <Box key={link.label} component="a" href={link.url} target="_blank" rel="noreferrer" sx={{
                     fontFamily: "'Fira Code', monospace", color: inkSec,
                     textDecoration: "none", fontSize: "0.8rem",
                     letterSpacing: "0.08em", textTransform: "uppercase",
