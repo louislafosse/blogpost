@@ -23,6 +23,7 @@ export const TagsPage: React.FC = () => {
   const border = isDarkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.08)";
 
   useEffect(() => {
+    window.scrollTo(0, 0);
     document.body.style.backgroundColor = "transparent";
     const t = setTimeout(() => setVisible(true), 50);
     return () => {
