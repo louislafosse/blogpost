@@ -12,9 +12,12 @@
     <script>
       // Recover path from GitHub Pages 404 redirect
       (function () {
-        var p = window.location.search && decodeURIComponent(window.location.search.slice(3));
-        if (p) {
-          window.history.replaceState(null, null, p || '/');
+        var search = window.location.search;
+        if (search) {
+          var p = decodeURIComponent(search.slice(3));
+          // Preserve the base path (e.g. /blogpost) so React Router basename is honoured
+          var base = window.location.pathname.replace(/\/$/, '');
+          window.history.replaceState(null, null, base + p);
         }
       })();
     </script>
