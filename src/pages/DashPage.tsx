@@ -521,7 +521,7 @@ export const Dash: React.FC = () => {
           fontFamily: "'Fira Code', monospace", mt: "10px",
           fontSize: "0.7rem", color: inkSec, transition: "color 1.2s ease",
         }}>
-          EST. 2026 • no where
+          EST. 2026 • Nowhere
         </Box>
       </Box>
     </Box>

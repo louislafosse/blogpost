@@ -1,0 +1,13 @@
+{
+  "slug": "louislafosse",
+  "name": "Louis Lafosse",
+  "handle": "louislafosse",
+  "avatar": "https://avatars.githubusercontent.com/u/114692238?v=4",
+  "bio": "Cybersecurity-related work focused on developing software protection tools, with experience in reverse engineering, operating system internals, offensive security, and sometimes cryptography.",
+  "pgp": "",
+  "email": "louis@x25519.dev",
+  "links": [
+    { "label": "GitHub", "url": "https://github.com/louislafosse" },
+    { "label": "Twitter", "url": "https://twitter.com/bishopd0m" }
+  ]
+}
