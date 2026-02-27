@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Redirecting...</title>
+    <script>
+      // SPA redirect for GitHub Pages
+      // Encodes the current path into a query param and redirects to index.html
+      var base = '/';
+      var pathSegments = window.location.pathname.split('/');
+      // If deployed as a project page (/repo-name/...) keep the first segment
+      if (pathSegments.length > 1 && pathSegments[1] !== '') {
+        base = '/' + pathSegments[1] + '/';
+      }
+      var redirect =
+        window.location.protocol +
+        '//' +
+        window.location.hostname +
+        (window.location.port ? ':' + window.location.port : '') +
+        base +
+        '?p=' +
+        encodeURIComponent(
+          '/' + pathSegments.slice(2).join('/') + window.location.search + window.location.hash
+        );
+      window.location.replace(redirect);
+    </script>
+  </head>
+  <body></body>
+</html>

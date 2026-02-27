@@ -1,0 +1,25 @@
+{
+    "tasks": {
+        "lint": "deno lint src/",
+        "dev": "vite",
+        "build": "tsc -b && vite build",
+        "preview": "vite preview --host"
+    },
+    "lint": {
+        "include": ["src/"],
+        "exclude": ["dist/", "node_modules/"],
+        "rules": {
+            "tags": ["recommended"],
+            "exclude": ["no-explicit-any", "no-unused-vars", "no-window"]
+        }
+    },
+    "compilerOptions": {
+      "lib": [
+        "dom",
+        "ES2015"
+      ]
+    },
+    "unstable": [
+      "sloppy-imports"
+    ]
+}

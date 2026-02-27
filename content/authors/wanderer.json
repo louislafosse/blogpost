@@ -1,0 +1,13 @@
+{
+  "slug": "wanderer",
+  "name": "The Wanderer",
+  "handle": "wanderer",
+  "avatar": "https://avatars.githubusercontent.com/u/12345678?v=4",
+  "bio": "I explore the esoteric boundaries of memory safety, cryptography, and digital philosophy. What is broken can be understood; what is understood can be mastered.\n\nIn the quiet spaces between allocated blocks, secrets lie dormant. My work is to illuminate these forgotten regions, mapping the topography of vulnerabilities before they are exploited.",
+  "pgp": "0xDEADBEEFCAFEBABE",
+  "email": "wanderer@seaofnulls.local",
+  "links": [
+    { "label": "GitHub", "url": "#" },
+    { "label": "Twitter", "url": "#" }
+  ]
+}
