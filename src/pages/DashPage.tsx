@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Box, Typography, Link } from "@mui/material";
+import { Box, Typography } from "@mui/material";
+import { Link as RouterLink } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SyntaxHighlighter } from '../lib/syntax.ts';
@@ -379,8 +380,8 @@ export const Dash: React.FC = () => {
                   if (!a) return null;
                   return (
                     <Box
-                      component="a"
-                      href={`/author/${entry.author}`}
+                      component={RouterLink}
+                      to={`/author/${entry.author}`}
                       sx={{
                         display: "flex", alignItems: "center", gap: "7px",
                         ml: "auto", textDecoration: "none",
@@ -461,8 +462,8 @@ export const Dash: React.FC = () => {
                   {entry.tags.map((tag) => (
                     <Box
                       key={tag}
-                      component="a"
-                      href={`/tags/${tag}`}
+                      component={RouterLink}
+                      to={`/tags/${tag}`}
                       sx={{
                         fontFamily: "'Fira Code', monospace", fontSize: "0.7rem",
                         textTransform: "lowercase", letterSpacing: "0.05em",
@@ -482,7 +483,7 @@ export const Dash: React.FC = () => {
               )}
 
               {/* Read more — ::after covers the whole card (card has position:relative) */}
-              <Box component={Link} href={entry.link} sx={{
+              <Box component={RouterLink} to={entry.link} sx={{
                 display: "inline-block", mt: "30px",
                 textDecoration: "none", color: ink, fontSize: "1.1rem",
                 fontFamily: "'Cormorant Garamond', serif", fontWeight: 700,

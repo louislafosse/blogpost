@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Box, Typography } from "@mui/material";
+import { Link as RouterLink } from 'react-router-dom';
 import { useThemeToggle } from '../components/utils/Theme.tsx';
 import postsData from '../../content/posts.json' with { type: 'json' };
 
@@ -77,7 +78,7 @@ export const TagsPage: React.FC = () => {
         display: "flex", justifyContent: "space-between", alignItems: "center",
         padding: "30px 60px", pointerEvents: "none",
       }}>
-        <Box component="a" href="/" sx={{
+        <Box component={RouterLink} to="/" sx={{
           pointerEvents: "auto",
           fontFamily: "'Fira Code', monospace", fontSize: "0.85rem",
           letterSpacing: "0.12em", textTransform: "uppercase",
@@ -137,8 +138,8 @@ export const TagsPage: React.FC = () => {
           {allTags.map(([tag, count]) => (
             <Box
               key={tag}
-              component="a"
-              href={`/tags/${tag}`}
+              component={RouterLink}
+              to={`/tags/${tag}`}
               sx={{
                 display: "flex", alignItems: "baseline", gap: "8px",
                 padding: "14px 24px",

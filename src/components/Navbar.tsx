@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, IconButton, Link, useTheme } from '@mui/material';
 import { Brightness7, Brightness4 } from '@mui/icons-material';
 import { useThemeToggle } from './../components/utils/Theme.tsx';
+import { Link as RouterLink } from 'react-router-dom';
 
 export const NavBar: React.FC = () => {
   const theme = useTheme();
@@ -19,7 +20,8 @@ export const NavBar: React.FC = () => {
       px: 4,
     }}>
       <Link
-        href="/"
+        component={RouterLink}
+        to="/"
         underline="none"
         sx={{
           fontWeight: 800,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useParams } from 'react-router-dom';
+import { useParams, Link as RouterLink } from 'react-router-dom';
 import { Box, Typography, useTheme } from "@mui/material";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -136,6 +136,7 @@ export const DocsPage: React.FC = () => {
   const [, setGridPositionBR] = useState({ bottom: 80, right: 80 });
 
   useEffect(() => {
+    window.scrollTo(0, 0);
     document.body.style.backgroundColor = 'transparent';
     return () => { document.body.style.backgroundColor = ''; };
   }, []);
@@ -176,7 +177,7 @@ export const DocsPage: React.FC = () => {
       {/* Fixed background — light */}
       <Box sx={{
         position: "fixed", top: 0, left: 0, width: "100%", height: "100vh",
-        backgroundImage: "url(/orig1.png)", backgroundSize: "cover",
+        backgroundImage: `url(${import.meta.env.BASE_URL}orig1.png)`, backgroundSize: "cover",
         backgroundRepeat: "no-repeat", backgroundPosition: "center 10%",
         zIndex: 0,
         transform: isDarkMode ? "scale(1)" : "scale(1.05)",
@@ -187,7 +188,7 @@ export const DocsPage: React.FC = () => {
       {/* Fixed background — dark */}
       <Box sx={{
         position: "fixed", top: 0, left: 0, width: "100%", height: "100vh",
-        backgroundImage: "url(/dark_theme.png)", backgroundSize: "cover",
+        backgroundImage: `url(${import.meta.env.BASE_URL}dark_theme.png)`, backgroundSize: "cover",
         backgroundRepeat: "no-repeat", backgroundPosition: "center top",
         zIndex: 1,
         opacity: isDarkMode ? 1 : 0,
@@ -222,7 +223,7 @@ export const DocsPage: React.FC = () => {
         pointerEvents: "none",
       }}>
         {/* Back to log */}
-        <Box component="a" href="/" sx={{
+        <Box component={RouterLink} to="/" sx={{
           pointerEvents: "auto",
           fontFamily: "'Fira Code', monospace",
           fontSize: "0.85rem",
@@ -630,8 +631,8 @@ export const DocsPage: React.FC = () => {
                   {tags.map((tag, idx) => (
                     <React.Fragment key={tag}>
                       <Box
-                        component="a"
-                        href={`/tags/${tag}`}
+                        component={RouterLink}
+                        to={`/tags/${tag}`}
                         sx={{
                           color: ink,
                           fontFamily: "'Fira Code', monospace",
@@ -667,7 +668,7 @@ export const DocsPage: React.FC = () => {
                   {nextPost && (
                     <Box>
                       <Box component="span" sx={labelSx}>Next</Box>
-                      <Box component="a" href={`/posts/${nextPost.slug}`} sx={navLinkSx}>
+                      <Box component={RouterLink} to={`/posts/${nextPost.slug}`} sx={navLinkSx}>
                         {nextPost.title}
                       </Box>
                     </Box>
@@ -675,7 +676,7 @@ export const DocsPage: React.FC = () => {
                   {prevPost && (
                     <Box>
                       <Box component="span" sx={labelSx}>Previous</Box>
-                      <Box component="a" href={`/posts/${prevPost.slug}`} sx={navLinkSx}>
+                      <Box component={RouterLink} to={`/posts/${prevPost.slug}`} sx={navLinkSx}>
                         {prevPost.title}
                       </Box>
                     </Box>

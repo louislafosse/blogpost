@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, Link as RouterLink } from "react-router-dom";
 import { Box, Typography } from "@mui/material";
 import ReactMarkdown from "react-markdown";
 import { useThemeToggle } from '../components/utils/Theme.tsx';
@@ -115,7 +115,7 @@ export const AuthorPage: React.FC = () => {
         display: "flex", justifyContent: "space-between", alignItems: "center",
         padding: "30px 60px", pointerEvents: "none",
       }}>
-        <Box component="a" href="/" sx={{
+        <Box component={RouterLink} to="/" sx={{
           pointerEvents: "auto",
           fontFamily: "'Fira Code', monospace", fontSize: "0.85rem",
           letterSpacing: "0.12em", textTransform: "uppercase",
@@ -321,7 +321,7 @@ export const AuthorPage: React.FC = () => {
                     <ReactMarkdown>{post.description}</ReactMarkdown>
                   </Box>
 
-                  <Box component="a" href={`/posts/${post.slug}`} sx={{
+                  <Box component={RouterLink} to={`/posts/${post.slug}`} sx={{
                     display: "inline-block", mt: "30px",
                     textDecoration: "none", color: ink, fontSize: "1.1rem",
                     fontFamily: "'Cormorant Garamond', serif", fontWeight: 700,
