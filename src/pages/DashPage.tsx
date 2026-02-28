@@ -428,10 +428,12 @@ export const Dash: React.FC = () => {
                     <Box
                       component={RouterLink}
                       to={`/author/${entry.author}`}
+                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
                       sx={{
                         display: "flex", alignItems: "center", gap: "7px",
                         ml: "auto", textDecoration: "none",
                         color: inkSec, transition: "color 0.2s ease",
+                        position: "relative", zIndex: 3,
                         "&:hover": { color: ink },
                       }}
                     >
@@ -504,12 +506,13 @@ export const Dash: React.FC = () => {
 
               {/* Tags row */}
               {entry.tags && entry.tags.length > 0 && (
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: "6px", mt: "28px" }}>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: "6px", mt: "28px", position: "relative", zIndex: 3 }}>
                   {entry.tags.map((tag) => (
                     <Box
                       key={tag}
                       component={RouterLink}
                       to={`/tags/${tag}`}
+                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
                       sx={{
                         fontFamily: "'Fira Code', monospace", fontSize: "0.7rem",
                         textTransform: "lowercase", letterSpacing: "0.05em",

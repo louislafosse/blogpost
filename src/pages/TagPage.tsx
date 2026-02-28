@@ -125,6 +125,19 @@ export const TagPage: React.FC = () => {
       }}>
         {/* Tag header */}
         <Box sx={{ mb: "60px" }}>
+          <Box
+            component={RouterLink}
+            to="/tags"
+            sx={{
+              fontFamily: "'Fira Code', monospace", fontSize: "0.75rem",
+              textTransform: "uppercase", letterSpacing: "0.12em",
+              color: inkSec, textDecoration: "none",
+              borderBottom: `1px solid ${inkSec}`, pb: "1px",
+              display: "inline-block", mb: "20px",
+              transition: "opacity 0.3s ease",
+              "&:hover": { opacity: 0.6 },
+            }}
+          >← all tags</Box>
           <Typography sx={{
             fontFamily: "'Fira Code', monospace", fontSize: "0.8rem",
             textTransform: "uppercase", letterSpacing: "0.15em",
