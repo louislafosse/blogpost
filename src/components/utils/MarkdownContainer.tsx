@@ -129,7 +129,7 @@ export const MarkdownContainer = styled('div')`
 
   /* Mermaid SVG is intercepted in DocsPage components — styling applied there */
 
-  code:not(pre > code) {
+  code:not(pre > code):not([class*="language-"]) {
     font-family: "Fira Code", monospace;
     font-size: 0.85em;
     background: ${props => props.theme.palette.mode === 'dark'

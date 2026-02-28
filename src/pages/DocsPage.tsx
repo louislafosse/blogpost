@@ -469,7 +469,7 @@ export const DocsPage: React.FC = () => {
             code({ node, className, children, ...props }) {
               const match = /language-(\w+)/.exec(className || '');
               const inline = !className?.includes('language-');
-              const codeContent = String(children).replace(/\n$/, '');
+              const codeContent = String(children).replace(/^\n/, '').replace(/\n$/, '');
               const isMermaid = match?.[1] === 'mermaid';
 
               // State for copy feedback
