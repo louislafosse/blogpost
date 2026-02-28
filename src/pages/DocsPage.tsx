@@ -92,7 +92,7 @@ const DetailsDropdown: React.FC<{ children?: React.ReactNode }> = ({ children })
         }}
       >
         <Box component="span" sx={{
-          fontSize: '0.75rem',
+          fontSize: '1.5rem',
           color: dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)',
           transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1)',
           transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
@@ -177,7 +177,7 @@ export const DocsPage: React.FC = () => {
       {/* Fixed background — light */}
       <Box sx={{
         position: "fixed", top: 0, left: 0, width: "100%", height: "100vh",
-        backgroundImage: `url(${import.meta.env.BASE_URL}orig1.png)`, backgroundSize: "cover",
+        backgroundImage: `url(${import.meta.env.BASE_URL}light_theme.png)`, backgroundSize: "cover",
         backgroundRepeat: "no-repeat", backgroundPosition: "center 10%",
         zIndex: 0,
         transform: isDarkMode ? "scale(1)" : "scale(1.05)",

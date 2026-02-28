@@ -1,47 +1,20 @@
 [
   {
-    "slug": "the-ghost-in-the-allocator",
-    "title": "The Ghost in the Allocator",
-    "date": "Oct 31, 2025",
-    "category": "Kernel Exploitation",
-    "author": "wanderer",
-    "tags": ["kernel", "heap", "use-after-free", "exploitation"],
-    "description": "There is a certain melancholy in the lifecycle of a memory block. It is born, it serves a purpose, and it is freed. But in the fog of complex drivers, we sometimes forget that *free* does not mean *gone*."
-  },
-  {
-    "slug": "entropy-and-the-sublime",
-    "title": "Entropy & The Sublime",
-    "date": "Sep 15, 2025",
-    "category": "Cryptography",
-    "author": "wanderer",
-    "tags": ["cryptography", "prng", "iot", "firmware"],
-    "description": "Friedrich painted the sublime as an overwhelming experience of nature. In cryptography, the sublime is true randomness. When I analyzed the firmware of the generic IoT camera, I found not chaos, but order — seeded by `time(0)`."
-  },
-  {
-    "slug": "obscurity-is-not-safety",
-    "title": "Obscurity is not Safety",
-    "date": "Aug 04, 2025",
-    "category": "Philosophy",
-    "author": "wanderer",
-    "tags": ["philosophy", "security", "obscurity", "essay"],
-    "description": "Standing above the sea of fog, one cannot see the path below. Yet, the path exists. Security through obscurity relies on the fog remaining forever. But the wind always blows eventually."
-  },
-  {
-    "slug": "reflections-on-trusting-trust",
-    "title": "'Reflections on Trusting Trust', but completely by accident this time",
-    "date": "Sep 8, 2021",
-    "category": "Compilers",
-    "author": "wanderer",
-    "tags": ["compilers", "llvm", "trust", "supply-chain"],
-    "description": "A series of experiments playing around with **LLVM** and **VMProtect**,\n```rust\nfn main() {\n\tprintln!(\"hello world\");\n}\n```\nand the accidental rediscovery of Ken Thompson's classic attack — from the inside."
-  },
-  {
     "slug": "rustld",
-    "title": "Rustld: Implementing a User-Space Dynamic Loader in Rust",
+    "title": "Implementing a modern Elf loader in Rust",
     "date": "Feb 28, 2026",
     "category": "Dynamic Linker",
     "author": "louislafosse",
     "tags": ["rust", "dynamic-linker", "x86_64", "aarch64","loader"],
     "description": "A modern (and working) ELF x86_64 & aarch64 loader (static & dynamic linker + compatible glibc & musl) written in Rust"
+  },
+  {
+    "slug": "",
+    "title": "Coming Soon...",
+    "date": "???",
+    "category": "???",
+    "author": "",
+    "tags": [],
+    "description": ""
   }
 ]

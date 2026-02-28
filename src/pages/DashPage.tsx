@@ -136,7 +136,7 @@ export const Dash: React.FC = () => {
       {/* Fixed background — light */}
       <Box sx={{
         position: "fixed", top: 0, left: 0, width: "100%", height: "100vh",
-        backgroundImage: `url(${import.meta.env.BASE_URL}orig1.png)`, backgroundSize: "cover",
+        backgroundImage: `url(${import.meta.env.BASE_URL}light_theme.png)`, backgroundSize: "cover",
         backgroundRepeat: "no-repeat", backgroundPosition: "center 10%",
         zIndex: 0,
         transform: isDarkMode ? "scale(1)" : "scale(1.05)",
@@ -169,7 +169,7 @@ export const Dash: React.FC = () => {
       <Box sx={{
         position: "fixed", top: 0, left: 0, width: "100%", height: "100%",
         zIndex: 2, pointerEvents: "none",
-        background: "linear-gradient(to bottom, rgba(10,11,14,0.1) 0%, rgba(10,11,14,0.6) 50%, rgba(10,11,14,0.92) 100%)",
+        background: "linear-gradient(to bottom, rgba(10,11,14,0.1) 0%, rgba(10,11,14,0.6) 50%, rgba(10,11,14,0.95) 85%, #0a0b0e 100%)",
         opacity: isDarkMode ? 1 : 0,
         transition: "opacity 1.2s ease-in-out",
       }} />
@@ -239,7 +239,16 @@ export const Dash: React.FC = () => {
             transition: "color 1.2s ease, text-shadow 1.2s ease, transform 0.3s ease",
             "&:hover": { transform: "scale(1.02)" },
           }}>
-            Above the Sea of Nulls
+            <Box component="span" sx={{
+              fontFamily: "'Arizonia', cursive",
+              fontStyle: "normal",
+              fontWeight: 300,
+              fontSize: "1.5em",
+              lineHeight: 0.85,
+              display: "inline-block",
+              verticalAlign: "middle",
+              mr: "0.04em",
+            }}>X</Box><Box component="span" sx={{ verticalAlign: "middle" }}>25519</Box>
           </Typography>
 
           {/* Subtitle — CSS fadeIn + drawLine, matching original HTML */}
@@ -266,7 +275,7 @@ export const Dash: React.FC = () => {
               transition: "background-color 1.2s ease",
             },
           }}>
-            Notes from the precipice of memory safety.
+              A blog about security research & internals
           </Box>
         </Box>
 
@@ -520,20 +529,31 @@ export const Dash: React.FC = () => {
               )}
 
               {/* Read more — ::after covers the whole card (card has position:relative) */}
-              <Box component={RouterLink} to={entry.link} sx={{
-                display: "inline-block", mt: "30px",
-                textDecoration: "none", color: ink, fontSize: "1.1rem",
-                fontFamily: "'Cormorant Garamond', serif", fontWeight: 700,
-                borderBottom: "1px solid transparent",
-                transition: "all 0.3s ease, color 1.2s ease", zIndex: 2,
-                "&::after": {
-                  content: '""', position: "absolute",
-                  top: 0, left: 0, width: "100%", height: "100%", zIndex: 1,
-                },
-                "&:hover": { borderBottomColor: ink, letterSpacing: "0.05em" },
-              }}>
-                {entry.linkLabel}
-              </Box>
+              {entry.link !== '/posts/' ? (
+                <Box component={RouterLink} to={entry.link} sx={{
+                  display: "inline-block", mt: "30px",
+                  textDecoration: "none", color: ink, fontSize: "1.1rem",
+                  fontFamily: "'Cormorant Garamond', serif", fontWeight: 700,
+                  borderBottom: "1px solid transparent",
+                  transition: "all 0.3s ease, color 1.2s ease", zIndex: 2,
+                  "&::after": {
+                    content: '""', position: "absolute",
+                    top: 0, left: 0, width: "100%", height: "100%", zIndex: 1,
+                  },
+                  "&:hover": { borderBottomColor: ink, letterSpacing: "0.05em" },
+                }}>
+                  {entry.linkLabel}
+                </Box>
+              ) : (
+                <Box sx={{
+                  display: "inline-block", mt: "30px",
+                  color: inkSec, fontSize: "0.85rem",
+                  fontFamily: "'Fira Code', monospace", letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                }}>
+                  // coming soon
+                </Box>
+              )}
             </Box>
           );
         })}
@@ -558,7 +578,7 @@ export const Dash: React.FC = () => {
           fontFamily: "'Fira Code', monospace", mt: "10px",
           fontSize: "0.7rem", color: inkSec, transition: "color 1.2s ease",
         }}>
-          EST. 2026 • Nowhere
+          CET. 2026 • Sea of Fog
         </Box>
       </Box>
     </Box>

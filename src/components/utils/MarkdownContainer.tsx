@@ -215,7 +215,7 @@ export const MarkdownContainer = styled('div')`
 
       &::before {
         content: '▸';
-        font-size: 0.75rem;
+        font-size: 1.5rem;
         transition: transform 0.2s ease;
         color: ${props => props.theme.palette.mode === 'dark'
           ? 'rgba(255,255,255,0.45)'

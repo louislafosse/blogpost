@@ -55,7 +55,7 @@ export const TagPage: React.FC = () => {
       {/* Fixed background — light */}
       <Box sx={{
         position: "fixed", top: 0, left: 0, width: "100%", height: "100vh",
-        backgroundImage: `url(${import.meta.env.BASE_URL}orig1.png)`, backgroundSize: "cover",
+        backgroundImage: `url(${import.meta.env.BASE_URL}light_theme.png)`, backgroundSize: "cover",
         backgroundRepeat: "no-repeat", backgroundPosition: "center 10%",
         zIndex: 0,
         transform: isDarkMode ? "scale(1)" : "scale(1.05)",

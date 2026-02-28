@@ -9,8 +9,10 @@ The system supports `x86_64` and `aarch64`, and handles both glibc- and musl-ori
 ## 1. Introduction
 
 Dynamic loading is often taught as a straightforward sequence: parse ELF headers, map segments, relocate symbols, jump to entry. In production, this sequence is only the outer shell. Actual loader behavior is a coupled protocol among memory mapping, process startup metadata, relocation state, TLS metadata, constructor ordering, and libc-facing runtime-linker surfaces. Local correctness in one subsystem is not enough if another subsystem is only partially initialized when user code or constructors begin to execute.
-
 `rustld` was built under this practical constraint. The project was not intended to be a byte-identical clone of `ld-linux`, but a controllable user-space runtime that can execute realistic binaries and keep enough compatibility for common glibc and musl workflows. The implementation therefore optimized for explicitness of order, data-structure ownership, and architecture isolation.
+
+Very minimal representation of a Dynamic Linker :
+![Dynamic linker resolving shared library dependencies at runtime](https://miro.medium.com/v2/resize:fit:1400/1*xWclbRTvV7Eb2sy2nNBrgw.png)
 
 ## 2. Problem Framing and Scope
 
