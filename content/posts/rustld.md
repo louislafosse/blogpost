@@ -144,7 +144,7 @@ This ordering was one of the highest-impact correctness changes in dynamic start
 
 ## 15. Stub-First Binding for Runtime-Linker Symbols
 
-Some symbols must bind to loader-provided behavior before external search paths are considered. This applies to runtime-linker and dlfcn-related names such as `_dl_*`, `__tunable_*`, and `__tls_get_addr`. Both architecture relocation engines include this policy so startup and runtime symbol requests are directed to the active loader’s compatibility layer when needed.
+Some symbols must bind to loader-provided behavior before external search paths are considered. This applies to runtime-linker and dlfcn-related names such as `_dl_*`, `_tunable_*`, and `__tls_get_addr`. Both architecture relocation engines include this policy so startup and runtime symbol requests are directed to the active loader’s compatibility layer when needed.
 
 This decision avoids accidental binding to incompatible external implementations during phases where loader-owned metadata is authoritative.
 
@@ -270,31 +270,15 @@ Valgrind can emit `brk segment overflow` warnings with otherwise clean heap summ
 
 Compatibility parity with all glibc internal paths remains a moving target, especially under unusual constructor and runtime loader interaction patterns.
 
-## 29. Safety Model and `unsafe` Boundaries
-
-A loader necessarily uses `unsafe` for raw memory, ABI crossings, relocation writes, and thread-pointer manipulation. The strategy in `rustld` is to keep unsafe usage concentrated around explicit contract boundaries and avoid broad unsafe regions in orchestration logic.
-
-This approach improves reviewability and fault localization. Most policy code remains in ordinary Rust, while low-level operations remain in dedicated blocks or helper functions tied to specific ABI assumptions.
-
-## 30. Threats to Validity
-
-Evaluation results can be influenced by environment differences. Distribution-specific library layouts, host kernel behavior, instrumentation semantics, and qemu implementation details all affect observed outcomes. Performance comparisons against host loaders are indicative but not always directly comparable because `rustld` may execute additional compatibility work or different policy branches.
-
-The project addresses these threats by reproducing issues across multiple tools, separating instrumentation artifacts from native regressions, and keeping architecture/environment context attached to test outcomes.
-
-## 31. Future Work
+## 29. Future Work
 
 Future work includes deeper interactive-shell compatibility, continued aarch64 hardening on complex dynamic workloads, and further startup-performance improvements in relocation-heavy paths. Another active direction is narrowing unsafe scope further without sacrificing readability or throughput.
 
-Longer-term work includes broader test automation and additional formalization of compatibility contracts for runtime-linker-facing state.
-
-## 32. Conclusion
+## 30. Conclusion
 
 `rustld` has evolved from a bootstrap experiment into a practical user-space loader runtime. It reconstructs startup state, loads and relocates dependency graphs, manages TLS for startup and runtime extension, provides active runtime-linker compatibility surfaces, and exposes controlled execution interfaces for both Rust and C consumers across `x86_64` and `aarch64`.
 
 The key implementation result is methodological rather than cosmetic: reliable loader behavior emerges when ordering constraints are treated as first-class correctness conditions. Mapping, auxv reconstruction, graph loading, relocation, TLS, constructor execution, and runtime-linker state publication must converge in a strict sequence. Enforcing that sequence is what enabled `rustld` to move from prototype behavior to sustained execution of real binaries.
-
-For companion documents, see `docs/TECHNICAL_EXPLANATION.md` for lower-level subsystem details and `docs/graph.md` for full flow visualization.
 
 ## Appendix A: Annotated `/bin/ls` Execution Timeline
 
@@ -351,7 +335,6 @@ The maintenance workflow for `rustld` repeatedly alternates between profiling an
 Typical profiling commands include flamegraph collection over representative binaries and syscall tracing over startup-heavy workloads. Typical correctness checks include baseline utility execution, dynamic-heavy binaries, architecture-emulated runs, and instrumentation-assisted diagnostics.
 
 The project experience is that performance changes are only accepted when they survive this full loop. Fast-but-unstable changes regress quickly in loader code, while slower but semantically robust changes provide a better base for subsequent optimization.
-
 
 
 <details>
