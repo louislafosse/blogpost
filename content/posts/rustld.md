@@ -86,11 +86,33 @@ After mapping, the loader rewrites auxv fields to describe the target image and 
 
 The stack image is rebuilt instead of partially mutating host-provided stack memory. This reconstruction includes `argc`, null-terminated argv and envp vectors, and auxv key/value records ending in `AT_NULL`. Rebuilding the stack as a coherent object significantly reduced early instability tied to pointer lifetime and layout mismatches.
 
-## 8. Interpreter Policy and musl Chainload
+## 8. Interpreter Policy and musl In-Process Bootstrap
 
-The loader inspects interpreter metadata and applies policy for chainload-versus-in-process execution. For musl-oriented interpreter paths and selected architecture cases, `rustld` may attempt chainloading the interpreter first, using candidate path derivation from target-root hints and environment-driven prefixes.
+The current implementation does not hand execution to an external interpreter process for musl targets. `PT_INTERP` is still parsed and used as metadata and for object loading decisions, but rustld keeps control and runs the full mapping, relocation, TLS, and constructor pipeline in-process for both glibc and musl binaries. In other words, interpreter metadata influences load decisions, not process control flow.
 
-If chainload fails, the loader can fall back to in-process behavior, preserving execution continuity where possible. This policy exists because musl and glibc startup behavior differ enough that one global strategy is fragile across environments.
+The musl path diverges from glibc in one key place: rustld does not initialize glibc rtld global stubs for musl targets. Instead, after graph loading and relocation, rustld installs musl TLS semantics (`install_tls_musl`) and then reconstructs the minimum musl stage-2 runtime state that startup code expects to observe. This is done by symbol-driven decoding around `__dls2b`, not by fixed absolute offsets only.
+
+The stage-2b reconstruction has architecture-specific decoding logic. On `x86_64`, rustld decodes RIP-relative instruction forms (`mov/lea/call` patterns) to recover the locations of auxv slot pointers, TLS size/align words, hwcap slot, and self pointer slot. On `aarch64`, rustld decodes `ADRP+ADD`, `LDR/STR`, and `STP` sequences to recover the same class of state with PC-relative addressing. The decoded addresses are then written with controlled volatile stores during `seed_musl_stage2b_runtime_state`.
+
+This decode-first model is critical because musl internals are sensitive to build layout and code generation details. Hardcoding offsets works for a narrow binary set and fails as soon as package rebuilds or architecture/toolchain variants shift local layout. By deriving slots from live code references at runtime, rustld preserves portability across real distributions.
+
+In the current tree, stage-2b seeding also calls decoded stage helper functions when available and keeps an explicit internal queue-slot fallback (`seed_musl_internal_queue_slot`) for builds that still require it. This fallback is intentionally narrow and guarded; it exists to keep runtime behavior stable while preserving the decode/symbol-driven path as the primary mechanism.
+
+The practical outcome is direct control transfer from rustld to the mapped target entrypoint, without a process-level interpreter handoff step and without relying on musl’s own loader process to perform startup state initialization.
+
+```rust
+if musl_target {
+    crate::tls::install_tls_musl(&linker.objects, pseudorandom_bytes);
+    seed_musl_stage2b_runtime_state(
+        &linker,
+        new_auxv as *const AuxiliaryVectorItem,
+        image.interpreter_path.as_deref(),
+        core::ptr::null(),
+    );
+}
+```
+
+This part of the pipeline is where most musl-specific regressions historically surfaced. The stabilizing constraints were: perform COPY before final IFUNC/IRELATIVE writes, seed stage-2 runtime state before dependency constructors run, and ensure TLS descriptor resolution observes finalized module IDs and TP-relative data.
 
 ## 9. Dynamic Object Graph Construction
 
@@ -201,6 +223,50 @@ struct RtldStubs {
 ```
 
 The allocated layout is intentionally generous and zero-initialized because glibc may access fields beyond the minimal subset expected by simplified models.
+
+### 20.1 Ubuntu-Only `x86_64` Crash Investigation (`sqrt_with_ld`)
+
+One of the most instructive failures in this project was a distribution-sensitive
+glibc startup bug that appeared on Ubuntu/Debian multiarch layouts but not on
+`/lib64`-style environments.
+
+The symptom was initially intermittent `SIGSEGV`/`SIGFPE` in the `x86_sqrt`
+test path (`./tests/sqrt_with_ld`) while other binaries such as `ls`, `id`, and
+`pwd` could succeed in the same run. The failing traces consistently ended near
+glibc early startup and IFUNC-heavy relocation logs, then crashed before stable
+user-space behavior was established.
+
+The core issue was startup ordering under layout mismatch:
+
+- forcing `__libc_early_init` on unsupported `x86_64` libc layouts could crash
+  early because our synthetic rtld compatibility state is tuned for known glibc
+  internal layouts;
+- skipping `__libc_early_init` entirely avoided that crash, but left ctype
+  internals uninitialized in paths reached by `sqrt_with_ld` (through glibc
+  format/parse internals), causing null/invalid state dereferences later.
+
+The fix was to make glibc startup policy explicit and layout-aware in
+`src/start/mod.rs`:
+
+```rust
+if !x86_64_glibc_layout_supported(linker) {
+    call_libc_ctype_init_fallback(linker);
+    return;
+}
+```
+
+So on supported layouts rustld still calls `__libc_early_init`; on unsupported
+multiarch layouts (for example `/lib/x86_64-linux-gnu/libc.so.6`), rustld
+skips full early-init and invokes `__ctype_init` as a targeted fallback.
+
+In parallel, the glibc copy-threshold patching logic was tightened:
+
+- prefer symbol-table derived offsets (`load_libc_copy_threshold_offsets_from_symtab`);
+- only allow fixed-offset fallback on known `/lib64`-style libc paths.
+
+That combination prevented both classes of failures: hard crashes when
+`__libc_early_init` was forced on incompatible layouts, and later crashes from
+missing ctype initialization when early-init was skipped.
 
 ## 21. Valgrind-Aware rseq Metadata
 
@@ -388,22 +454,13 @@ flowchart TD
       D0 -- yes --> D1[inspect PT_INTERP and DT_NEEDED]
       D1 --> D2{target flavor}
 
-      D2 -- glibc --> D3[DynamicLinker new]
-      D2 -- musl --> D4{chainload policy}
-      D2 -- other --> D5[generic fallback path]
+      D2 -- glibc --> D3[init glibc rtld stubs]
+      D2 -- musl --> D4[musl in-process path]
+      D2 -- other --> D5[generic in-process path]
 
-      D4 -- chainload attempt --> D6[try interpreter execve]
-      D6 --> D7{execve success}
-      D7 -- yes --> Z0([control leaves rustld process])
-      D7 -- no --> D8[in process musl fallback]
-      D4 -- skip --> D8
-
-      D3 --> D9[init glibc rtld stubs]
-      D8 --> D10[musl path without glibc rtld stub init]
-      D5 --> D10
-
-      D9 --> D11[add executable object]
-      D10 --> D11
+      D3 --> D11[add executable object]
+      D4 --> D11
+      D5 --> D11
       D11 --> D12[walk DT_NEEDED recursively]
       D12 --> D13[resolve library path]
       D13 --> D14[map dependency object]
@@ -478,14 +535,29 @@ flowchart TD
       P7 --> P8[seed startup glibc symbol pointers]
       P8 --> P9[apply_irelative_relocations]
 
-      P2 -- yes --> P9
+      P2 -- yes --> PM1[install_tls_musl initial thread]
+      PM1 --> PM2{decode stage2b by arch}
+      PM2 -- x86_64 --> PM2X[decode RIP relative refs around __dls2b]
+      PM2 -- aarch64 --> PM2A[decode ADRP ADD LDR STP refs around __dls2b]
+      PM2X --> PM3[seed auxv tls hwcap self slots]
+      PM2A --> PM3
+      PM3 --> PM4{stage helper funcs decoded}
+      PM4 -- yes --> PM5[invoke stage2b helper pair]
+      PM4 -- no --> PM6[skip helper call]
+      PM5 --> PM7[seed musl internal queue slot fallback]
+      PM6 --> PM7
+      PM7 --> P9
 
       P9 --> P10[invoke each queued IRELATIVE resolver]
       P10 --> P11[write resolver return value into relocation slot]
       P11 --> P12[resolve requested entry override]
       P12 --> P13{glibc startup path}
-      P13 -- yes --> P14[update rtld stack end and invoke libc early init]
-      P14 --> P15[patch libc copy thresholds]
+      P13 -- yes --> P14[update rtld stack end]
+      P14 --> P14A{x86_64 libc layout supported}
+      P14A -- yes --> P14B[invoke __libc_early_init]
+      P14A -- no --> P14C[invoke __ctype_init fallback]
+      P14B --> P15[patch libc copy thresholds]
+      P14C --> P15
       P15 --> P16[run constructors dependency order]
       P13 -- no --> P16
       P16 --> P17[JumpInfo entry and stack]

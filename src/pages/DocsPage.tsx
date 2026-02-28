@@ -114,6 +114,36 @@ const DetailsDropdown: React.FC<{ children?: React.ReactNode }> = ({ children })
   );
 };
 
+const MarkdownDetails = ({ node: _node, children }: any) => (
+  <DetailsDropdown>{children}</DetailsDropdown>
+);
+
+interface MarkdownErrorBoundaryProps {
+  children: React.ReactNode;
+  onError?: (error: Error) => void;
+}
+
+interface MarkdownErrorBoundaryState {
+  hasError: boolean;
+}
+
+class MarkdownErrorBoundary extends React.Component<MarkdownErrorBoundaryProps, MarkdownErrorBoundaryState> {
+  state: MarkdownErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): MarkdownErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    this.props.onError?.(error);
+  }
+
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
+
 export const DocsPage: React.FC = () => {
   const theme = useTheme();
   const { isDarkMode, toggleTheme } = useThemeToggle();
@@ -125,15 +155,22 @@ export const DocsPage: React.FC = () => {
     : '';
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [remarkMermaid, setRemarkMermaid] = useState<any>(null);
+  const [mermaidDisabled, setMermaidDisabled] = useState(false);
 
   // Lazy-load Mermaid — keeps it out of the initial bundle
   useEffect(() => {
-    import('remark-mermaid-plugin').then((m) => setRemarkMermaid(() => m.default));
+    let mounted = true;
+    import('remark-mermaid-plugin')
+      .then((m) => {
+        if (mounted) setRemarkMermaid(() => m.default);
+      })
+      .catch(() => {
+        if (mounted) setMermaidDisabled(true);
+      });
+    return () => {
+      mounted = false;
+    };
   }, []);
-
-  const titleRef = useRef<HTMLHeadingElement>(null);
-  const [, setGridPosition] = useState({ top: 80, left: 455 });
-  const [, setGridPositionBR] = useState({ bottom: 80, right: 80 });
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -142,31 +179,11 @@ export const DocsPage: React.FC = () => {
   }, []);
 
   const handleImageClick = (src: string) => setLightboxSrc(src);
-
-  useEffect(() => {
-    const updateGridPosition = () => {
-      if (titleRef.current) {
-        const titleRect = titleRef.current.getBoundingClientRect();
-        const container = titleRef.current.offsetParent?.getBoundingClientRect();
-        const containerLeft = container?.left || 0;
-        const containerRight = container?.right || window.innerWidth;
-  
-        setGridPosition({
-          top: titleRect.top + window.scrollY - 65,
-          left: titleRect.left - containerLeft - 70
-        });
-  
-        setGridPositionBR({
-          bottom: window.innerHeight - (titleRect.bottom + window.scrollY) - 380,
-          right: containerRight - titleRect.right - 60
-        });
-      }
-    };
-  
-    updateGridPosition();
-    window.addEventListener('resize', updateGridPosition);
-    return () => window.removeEventListener('resize', updateGridPosition);
-  }, []);
+  const handleMarkdownRenderError = (error: Error) => {
+    if (mermaidDisabled) return;
+    console.error('Mermaid render failed, disabling Mermaid plugin for this page.', error);
+    setMermaidDisabled(true);
+  };
 
   const ink = isDarkMode ? "#f2f2f2" : "#1a1a1a";
   const inkSec = isDarkMode ? "#a0a0a0" : "#4a4a4a";
@@ -310,7 +327,6 @@ export const DocsPage: React.FC = () => {
       }}>
       <MarkdownContainer>
         <Typography
-          ref={titleRef}
           component="div"
         >
           <Typography
@@ -387,11 +403,15 @@ export const DocsPage: React.FC = () => {
           />
         </Typography>
 
+        <MarkdownErrorBoundary
+          key={mermaidDisabled ? 'md-safe' : 'md-mermaid'}
+          onError={handleMarkdownRenderError}
+        >
         <ReactMarkdown
           children={markdownContent.replace(/__(.*?)__/g, "<u>$1</u>")}
           remarkPlugins={[
             remarkGfm,
-            ...(remarkMermaid ? [[remarkMermaid, { theme: isDarkMode ? 'dark' : 'default' }] as any] : []),
+            ...(!mermaidDisabled && remarkMermaid ? [[remarkMermaid, { theme: isDarkMode ? 'dark' : 'default' }] as any] : []),
           ]}
           rehypePlugins={[
             rehypeRaw,
@@ -457,7 +477,7 @@ export const DocsPage: React.FC = () => {
 
               return <pre {...props} data-is-mermaid={isMermaid}>{children}</pre>;
             },
-            details: ({ node: _node, children }: any) => <DetailsDropdown>{children}</DetailsDropdown>,
+            details: MarkdownDetails,
             blockquote: ({ node, ...props }) => (
               <blockquote style={{ margin: 0 }} {...props} />
             ),
@@ -581,6 +601,7 @@ export const DocsPage: React.FC = () => {
           }}
 
         />
+        </MarkdownErrorBoundary>
 
         {/* Footer */}
         {(() => {
