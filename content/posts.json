@@ -36,7 +36,7 @@
     "description": "A series of experiments playing around with **LLVM** and **VMProtect**,\n```rust\nfn main() {\n\tprintln!(\"hello world\");\n}\n```\nand the accidental rediscovery of Ken Thompson's classic attack — from the inside."
   },
   {
-    "slug": "rustld-implementation",
+    "slug": "rustld",
     "title": "Rustld: Implementing a User-Space Dynamic Loader in Rust",
     "date": "Feb 28, 2026",
     "category": "Dynamic Linker",
