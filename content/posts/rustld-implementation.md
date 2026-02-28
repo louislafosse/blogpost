@@ -499,7 +499,7 @@ flowchart TD
       P10 --> P11[write resolver return value into relocation slot]
       P11 --> P12[resolve requested entry override]
       P12 --> P13{glibc startup path}
-      P13 -- yes --> P14[update rtld stack end and call libc early init]
+      P13 -- yes --> P14[update rtld stack end and invoke libc early init]
       P14 --> P15[patch libc copy thresholds]
       P15 --> P16[run constructors dependency order]
       P13 -- no --> P16
