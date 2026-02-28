@@ -1,58 +1,34 @@
 ## Abstract
 
-This article documents the implementation of `rustld`, a user-space ELF loader that can execute Linux binaries by rebuilding process startup state, mapping objects, relocating symbols, installing TLS, running constructors, and handing off control to the target entrypoint.
+This report describes the design and implementation of `rustld`, a user-space ELF loader written in Rust that executes Linux binaries by reconstructing the runtime contract normally assembled by the kernel and system dynamic linker. The implementation is intended for real binaries rather than reduced demonstrations. It includes executable and shared-object mapping, startup stack and auxv reconstruction, recursive dependency loading, architecture-specific relocation engines, static and runtime TLS management, constructor sequencing, and final control transfer to the target entrypoint.
 
-The project started as a practical runtime engineering effort, not as a parser demo. The primary target was correctness against real programs (glibc and musl, static and dynamic, x86_64 and aarch64) while keeping the implementation embeddable from both Rust and C.
+The system supports `x86_64` and `aarch64`, and handles both glibc- and musl-oriented targets through explicit startup policy branching. It is available both as a direct executable interface and as an embeddable runtime via Rust and C APIs. This document presents the full technical story from architecture decisions to subsystem mechanics, with emphasis on ordering constraints, failure modes encountered during implementation, and the reasoning that shaped the current codebase.
 
-This post explains the full pipeline from `ElfLoader` API calls to target execution, including key technical tradeoffs and failure modes encountered during implementation.
+## 1. Introduction
 
-## 1. Problem Statement and Design Goals
+Dynamic loading is often taught as a straightforward sequence: parse ELF headers, map segments, relocate symbols, jump to entry. In production, this sequence is only the outer shell. Actual loader behavior is a coupled protocol among memory mapping, process startup metadata, relocation state, TLS metadata, constructor ordering, and libc-facing runtime-linker surfaces. Local correctness in one subsystem is not enough if another subsystem is only partially initialized when user code or constructors begin to execute.
 
-A dynamic loader is not one subsystem. It is a coordinated set of contracts:
+`rustld` was built under this practical constraint. The project was not intended to be a byte-identical clone of `ld-linux`, but a controllable user-space runtime that can execute realistic binaries and keep enough compatibility for common glibc and musl workflows. The implementation therefore optimized for explicitness of order, data-structure ownership, and architecture isolation.
 
-- ELF mapping and memory permissions
-- startup stack/argv/envp/auxv ABI reconstruction
-- dependency graph construction (`DT_NEEDED`, lookup scopes)
-- relocation execution with correct ordering
-- TLS layout and runtime expansion
-- constructor/destructor sequencing
-- libc/runtime linker compatibility surfaces
+## 2. Problem Framing and Scope
 
-If one of those is slightly wrong, crashes happen far from the root cause.
+The central technical problem is to launch a target image with startup semantics that are valid for code that was not compiled with `rustld` in mind. This means the loader must satisfy assumptions made by startup objects, libc internals, constructors, symbol resolvers, and thread-local access paths. Those assumptions are sometimes undocumented or distribution-dependent.
 
-`rustld` design goals were:
+The scope of `rustld` includes loading from raw bytes and from paths, static and dynamic execution paths, dependency graph loading through `DT_NEEDED`, relocation for both supported architectures, TLS setup and runtime growth, and dlfcn-facing behavior through runtime stubs. The scope also includes integration interfaces that are usable in embedding scenarios without requiring direct modification of loader internals.
 
-- run real Linux binaries from bytes or file paths
-- support both direct execution and embedded API usage
-- support glibc and musl targets
-- support x86_64 and aarch64
-- keep architecture-dependent code isolated
-- keep performance acceptable for short-lived binaries
+The scope does not claim perfect host-loader parity for every glibc-internal path. It also does not claim that every instrumentation environment preserves native behavior, especially in areas such as rseq or emulated memory-model behavior.
 
-Non-goals were:
+## 3. Architectural Decomposition
 
-- being bit-for-bit identical to system `ld-linux`
-- implementing every obscure ELF extension at once
-- hiding all behavioral differences under heavy instrumentation tools
+The repository separates high-level policy from low-level mechanism. Shared policy modules own process-level sequencing, graph orchestration, and compatibility state transitions. Architecture-specific modules own syscall ABI, relocation opcode logic, thread-pointer operations, and entry trampolines.
 
-## 2. Repository Architecture
+In practical terms, `src/runtime_loader.rs` and `src/start/mod.rs` define the execution envelope. `src/linking/mod.rs` and `src/shared_object.rs` define object graph and symbol resolution behavior. `src/tls.rs` defines TLS layout, installation, and runtime extension behavior. `src/ld_stubs.rs` provides runtime-linker-compatible exports and helper routines. `src/c_api.rs` provides C ABI integration.
 
-The codebase is deliberately split into orchestration modules and architecture modules.
+Architecture-specific implementations are isolated in `src/arch/x86_64/*` and `src/arch/aarch64/*`. This split keeps portability work manageable: architecture fixes stay local, while shared startup policy remains stable.
 
-- `src/runtime_loader.rs`: high-level public entrypoints (`prepare`, `execute`)
-- `src/start/mod.rs`: process startup pipeline, stack rebuild, handoff
-- `src/linking/mod.rs`: dynamic linker state, object registry, lookup scopes
-- `src/shared_object.rs`: loaded object representation and symbol/hash lookup
-- `src/tls.rs`: static TLS layout, installation, runtime TLS growth
-- `src/ld_stubs.rs`: runtime linker compatibility symbols and glue
-- `src/c_api.rs`: C ABI wrappers around `ElfLoader`
-- `src/arch/x86_64/*`, `src/arch/aarch64/*`: arch-specific syscall/trampoline/relocation
+## 4. API Surface and Entry Semantics
 
-This split was essential once relocation and TLS became architecture-dependent but startup policy remained shared.
-
-## 3. Public API Layer (`ElfLoader`)
-
-The primary API accepts target bytes and a user-facing argv as `Vec<String>`, then internally converts that into C-style pointers.
+The primary public type is `ElfLoader`. The loader accepts an argv vector for target execution and optional environment and auxv overrides. By default, if overrides are absent, parent process state is reused.
 
 ```rust
 pub unsafe fn prepare_from_bytes(
@@ -65,42 +41,21 @@ pub unsafe fn prepare_from_bytes(
 ) -> JumpInfo
 ```
 
-Important behavior:
+The API deliberately splits preparation from execution. `prepare_*` returns `JumpInfo` so callers can inspect or delay transfer. `execute_*` performs preparation and immediately transfers control. Additional entry-override variants accept either a symbol name or explicit address, enabling use cases that target non-default entrypoints such as shared-library function dispatch.
 
-- `target_argv` is required and validated.
-- `env_pointer: None` means inherit parent environment.
-- `auxv_template: None` means derive auxv from parent process.
-- `prepare_*` returns `JumpInfo { entry, stack }` without jumping.
-- `execute_*` performs the jump and never returns on success.
-- `*_with_entry` variants allow entry override by symbol or address.
+A configurable `indirect_syscalls` mode is available where architecture support exists. This setting is applied before loading work starts, so syscall behavior is consistent through the full startup pipeline.
 
-This API shape makes normal usage simple while preserving full control for embedding scenarios.
+## 5. High-Level Startup Pipeline
 
-## 4. Startup Pipeline Overview
+The startup pipeline in `launch_target_with_source` transforms input bytes and caller metadata into a runnable process context. The loader first resolves the target source and builds a loaded image abstraction. It then normalizes and patches auxv to match target image properties and reconstructs a target-style startup stack. From there, the control path diverges between static and dynamic handling.
 
-The core execution path in `start::launch_target_with_source` is:
+For static targets, the pipeline can return directly once the stack and entrypoint are finalized. For dynamic targets, the loader proceeds through object-graph loading, scope construction, relocation convergence, TLS installation, compatibility-state publication, constructor execution, and entry transfer.
 
-1. Load target image (from bytes or file).
-2. Inspect ELF kind and interpreter metadata.
-3. Normalize and patch auxv values.
-4. Rebuild target startup stack (`argc/argv/envp/auxv`).
-5. If static: return `JumpInfo`.
-6. If dynamic: construct `DynamicLinker`, load dependencies, relocate, install TLS, run init, handoff.
+This split keeps static handling simple while preserving full dynamic semantics when needed.
 
-For dynamic binaries, this is where almost all complexity lives.
+## 6. ELF Mapping and BSS Materialization
 
-## 5. ELF Mapping and Image Construction
-
-Target mapping follows normal ELF PT_LOAD behavior:
-
-- parse ELF header and program headers
-- compute virtual address bounds
-- allocate mapping region
-- copy file bytes for each load segment
-- zero-fill `p_memsz - p_filesz` (BSS)
-- gather pointers to PHDR, DYNAMIC, interpreter string
-
-A representative segment copy path:
+Segment mapping follows PT_LOAD semantics with explicit byte-copy and zero-fill behavior. Accurate bounds and alignment are essential because downstream relocation and TLS logic assume mapped ranges are complete and consistent.
 
 ```rust
 if header.p_filesz > 0 {
@@ -119,76 +74,49 @@ if header.p_memsz > header.p_filesz {
 }
 ```
 
-Most "later" bugs are often born here (bad bounds, wrong base arithmetic, wrong permission restoration), so this phase was hardened early.
+A recurring implementation lesson was that mapping errors often manifest as late-stage failures. Relocation, constructors, or thread setup may appear to fail, while the true root cause is an earlier segment-boundary or base-address mismatch.
 
-## 6. Rebuilding Process Startup ABI
+## 7. Startup Stack and Auxv Reconstruction
 
-Mapping alone is insufficient. The target expects a valid initial stack layout and coherent auxv.
+After mapping, the loader rewrites auxv fields to describe the target image and runtime capabilities. It updates fields such as `AT_PHDR`, `AT_PHNUM`, `AT_PHENT`, `AT_ENTRY`, `AT_EXECFN`, and capability/page-size tags. It also stabilizes pointer-backed auxv entries and random-related values so consumers see durable addresses.
 
-`rustld` rewrites key auxv fields to point at the loaded target image:
+The stack image is rebuilt instead of partially mutating host-provided stack memory. This reconstruction includes `argc`, null-terminated argv and envp vectors, and auxv key/value records ending in `AT_NULL`. Rebuilding the stack as a coherent object significantly reduced early instability tied to pointer lifetime and layout mismatches.
 
-- `AT_PHDR`, `AT_PHNUM`, `AT_PHENT`
-- `AT_ENTRY`, `AT_EXECFN`
-- `AT_BASE` (when relevant)
-- `AT_PAGE_SIZE`, `AT_HWCAP`, `AT_HWCAP2`, `AT_MINSIGSTKSZ`
-- `AT_RANDOM` stabilization through copied storage
+## 8. Interpreter Policy and musl Chainload
 
-Then it builds a new stack image in ABI order:
+The loader inspects interpreter metadata and applies policy for chainload-versus-in-process execution. For musl-oriented interpreter paths and selected architecture cases, `rustld` may attempt chainloading the interpreter first, using candidate path derivation from target-root hints and environment-driven prefixes.
 
-- `argc`
-- argv pointers + null terminator
-- env pointers + null terminator
-- auxv key/value pairs ending with `AT_NULL`
+If chainload fails, the loader can fall back to in-process behavior, preserving execution continuity where possible. This policy exists because musl and glibc startup behavior differ enough that one global strategy is fragile across environments.
 
-This startup-contract reconstruction was one of the most important reliability milestones.
+## 9. Dynamic Object Graph Construction
 
-## 7. Dynamic Dependency Loading
+Dynamic execution uses `DynamicLinker` to own the live object graph. The main executable is inserted first, dependencies are loaded recursively from `DT_NEEDED`, and aliases are recorded to normalize path-variant lookup behavior. Object metadata is encapsulated in `SharedObject`, including relocation slices, symbol/string tables, TLS descriptors, hash metadata, and dynamic-array pointers.
 
-For dynamic binaries, `DynamicLinker` is initialized and populated:
+The graph also includes runtime link-map allocations and active-linker publication logic for stub and dlfcn interaction.
 
-- executable inserted as first object
-- `DT_NEEDED` dependencies resolved recursively
-- per-object metadata retained (path, base, dynamic pointers, TLS, symbol tables)
-- lookup scopes prepared
+## 10. Lookup Scope Computation
 
-Library search defaults include:
+Once objects are loaded, lookup scopes are rebuilt for each requester. This precomputed ordering makes relocation lookup deterministic and avoids repeated dependency traversal on every symbol query. The scope model combines executable-first preemption expectations with requester-specific traversal and load-order fallback behavior.
 
-- `/lib64`, `/usr/lib64`
-- `/lib`, `/usr/lib`
-- `/usr/local/lib64`, `/usr/local/lib`
+The scope precomputation pass is a performance optimization and a correctness mechanism. Without it, symbol resolution can drift under repeated graph traversal, especially when runtime loading introduces additional nodes.
 
-`LD_LIBRARY_PATH` and configured paths are also handled.
+## 11. Symbol Resolution Model
 
-## 8. Shared Object Model and Fast Symbol Paths
+`SharedObject` symbol lookup supports GNU hash and SysV hash paths, symbol visibility checks, weak/global binding logic, and version filtering through `DT_VERSYM`. The object caches exportability in compact masks and precomputed buckets, allowing hot lookup paths to skip repeated structural checks.
 
-`SharedObject` captures all runtime lookup state:
+Name matching is byte-oriented and supports version-suffixed comparisons with base-name fallback where appropriate. This reduces allocation and string-conversion overhead in relocation-heavy workloads.
 
-- `SymbolTable` and `StringTable`
-- GNU hash and SysV hash tables
-- `DT_VERSYM` visibility filtering
-- precomputed exportability bitmask
-- precomputed SysV export buckets
+At linker level, active-symbol lookup can route through the currently published linker instance, enabling runtime stub paths to resolve symbols without duplicating graph logic.
 
-Lookup path supports both hash families and avoids repeated full scans.
+## 12. Relocation Framework
 
-It also performs version-suffix tolerant matches (`name` and `name@VERSION`) using byte-level checks to reduce overhead.
+Relocation is implemented per architecture while preserving a shared orchestration pattern. For each object, the engine computes writable relocation ranges, applies RELA and RELR streams, defers resolver-sensitive classes, and later executes deferred passes in constrained order.
 
-## 9. Relocation Engines (x86_64 + aarch64)
+The x86_64 and aarch64 implementations differ in relocation opcode handling, TLS relocation forms, and some compatibility decisions, but both use the same structural rules for writable-range preparation and deferred execution.
 
-Relocation logic is architecture-specific and lives in:
+## 13. Lookup Cache in Relocation Hot Paths
 
-- `src/arch/x86_64/syscall/relocation.rs`
-- `src/arch/aarch64/syscall/relocation.rs`
-
-Shared strategy:
-
-- make relocation target ranges writable
-- iterate RELA and optional RELR streams
-- resolve symbol-based relocations via linker scopes
-- record deferred classes (IFUNC/IRELATIVE/COPY)
-- restore protections
-
-A critical performance and correctness component is `SymbolLookupCache`.
+Relocation uses a dedicated cache keyed by requester and symbol identity to avoid repeated scope traversal and redundant resolution work. The cache separates no-exclusion and exclusion-aware lookups, reflecting common versus less common search patterns.
 
 ```rust
 pub struct SymbolLookupCache {
@@ -197,289 +125,411 @@ pub struct SymbolLookupCache {
 }
 ```
 
-This avoids repeated scope traversals for hot symbol names during large relocation batches.
+This cache was introduced after profiling showed repeated symbol resolution dominating relocation time in short-lived dynamic workloads.
 
-## 10. Stub-Preferred Symbol Resolution
+## 14. Deferred IFUNC/IRELATIVE/COPY Semantics
 
-Certain symbols are intentionally resolved to local stub implementations before normal lookup (for rtld/libdl contract behavior), for example:
-
-- `_dl_*`
-- `__tunable_*`
-- `__tls_get_addr`
-- `dlopen`, `dlsym`, `dlclose`, `dlerror`, `dl_iterate_phdr`
-
-This behavior is architecture-aware and implemented directly in relocation modules using PHF static maps for low-overhead lookup.
-
-## 11. IFUNC, IRELATIVE, and COPY Ordering
-
-Resolver ordering matters.
-
-`rustld` uses deferred queues for classes that should run after primary relocation convergence:
-
-- copy relocations collected in `CopyReloc`
-- IFUNC-like and IRELATIVE entries collected in `IrelativeReloc`
-
-Processing order:
-
-1. primary relocations
-2. copy relocations
-3. IFUNC/IRELATIVE resolver calls
-
-Executing these too early produced unstable behavior in real-world binaries, so deferred execution became mandatory.
-
-## 12. TLS Architecture: Static Layout First
-
-TLS implementation in `src/tls.rs` is one of the core subsystems.
-
-`prepare_tls_layout` does:
-
-- assign module IDs for objects with `PT_TLS`
-- compute block offsets with alignment constraints
-- reserve runtime static window
-- reserve a small guard area below TP for glibc/rseq-sensitive behavior
-- compute final TP-relative offsets per module
-
-The resulting `TlsLayout` captures:
-
-- `tcb_offset`
-- `tls_size`
-- module count
-- max alignment
-- runtime static range
-
-Without correct TP-relative offsets, local-exec and initial-exec TLS models fail quickly.
-
-## 13. TLS Installation (`install_tls`)
-
-After relocation, initial thread TLS is installed:
-
-- allocate TLS+TCB memory
-- copy TLS init images
-- zero trailing TLS bytes
-- create DTV storage with spare slots
-- initialize TCB metadata
-- seed stack and pointer guards from random source
-- set thread pointer (arch-specific)
-
-The implementation uses glibc-compatible DTV conventions, including surplus slots to reduce early realloc churn.
-
-## 14. Runtime TLS Growth (`dlopen`-style)
-
-Dynamic module loading after startup requires live TLS growth.
-
-`register_runtime_tls_modules` handles:
-
-- assigning module IDs for newly loaded TLS modules
-- static placement when capacity allows
-- dynamic TLS fallback when static space is exhausted
-- DTV growth and propagation
-- updates across tracked thread TCBs
-
-Thread registry synchronization is explicit (`THREAD_TRACK_LOCK`) and conservative.
-
-## 15. `__tls_get_addr` and TLSDESC Path
-
-TLS relocations resolve through:
-
-- static TP-relative offsets when possible
-- runtime module lookup and allocation via `resolve_tls_address`
-
-TLSDESC descriptors are wired so the fast path can return direct offsets when known, while fallback paths call into resolver logic using TLS index payloads.
-
-This keeps both startup and post-`dlopen` behavior valid.
-
-## 16. glibc Runtime-Linker Contract (`ld_stubs`)
-
-Even with relocation and TLS correct, glibc startup can fail if rtld globals are missing or inconsistent.
-
-`ld_stubs.rs` provides compatibility surfaces such as:
-
-- `_rtld_global`, `_rtld_global_ro`
-- link_map-compatible structures
-- `_dl_argv`, `__libc_enable_secure`, `__libc_stack_end`
-- `_dl_*` helper exports used by libc/libdl paths
-- tunable hooks and TLS hooks
-
-It also includes guarded behavior for instrumentation contexts (for example valgrind/rseq-sensitive paths).
-
-This layer is not optional for glibc-heavy binaries.
-
-## 17. musl vs glibc Handling
-
-`rustld` handles musl and glibc differently where required.
-
-- musl-target interpreter chains may be attempted first (`try_chainload_musl_interpreter`) for compatibility.
-- glibc paths rely more heavily on rtld contract emulation (`ld_stubs`) and strict TLS/runtime ordering.
-
-This split came from observed behavior differences, not from theoretical preference.
-
-## 18. Architecture-Specific Layer (`src/arch/*`)
-
-Architecture-specific folders own low-level behavior:
-
-- mmap/mprotect wrappers
-- exit syscall wrappers
-- thread-pointer set/get
-- jump trampoline/handoff ABI
-- relocation opcode handling
-
-Currently supported:
-
-- x86_64
-- aarch64
-
-This keeps cross-arch extension feasible without duplicating high-level startup logic.
-
-## 19. Optional Indirect Syscall Mode
-
-`ElfLoader` exposes `indirect_syscalls` mode.
-
-When enabled (supported on x86_64 and aarch64), syscalls are emitted through anonymous executable trampoline pages rather than fixed instruction sequences in the image.
-
-This is a runtime mode toggle, applied before loader activity starts.
-
-## 20. C Embedding API
-
-`src/c_api.rs` exports a stable C-facing API with explicit status codes.
-
-Key functions:
-
-- `rustld_elfloader_prepare_from_bytes`
-- `rustld_elfloader_execute_from_bytes`
-- `rustld_elfloader_execute_from_bytes_with_entry`
-
-Features:
-
-- argv parsing from C pointers
-- optional envp/auxv override
-- entry override by symbol or address
-- panic containment via `catch_unwind` to return error codes instead of unwinding across FFI
-
-This allows integrating rustld in C applications without reimplementing startup logic.
-
-## 21. Entry Override and Shared Library Invocation
-
-`*_with_entry` execution modes allow selecting a non-default entry:
-
-- symbol-based (`entry_symbol`)
-- address-based (`entry_address`)
-
-This made it practical to load and jump into specific exported functions from shared objects, enabling SDK-like embedding patterns beyond normal executable startup.
-
-## 22. Performance Work and Hotspots
-
-Main observed hotspots were:
-
-- symbol lookup churn during relocation
-- repeated string handling in lookup paths
-- startup globals set in multiple passes
-
-Optimizations applied in the current codebase include:
-
-- `FxHashMap` caches in relocation lookup paths
-- precomputed exportability masks in `SharedObject`
-- prebucketed SysV export candidates
-- `memchr`-based version stripping and symbol name parsing
-- `SmallVec`/`SmartString` use in selected hot paths
-
-Performance remains workload-dependent (short process startup vs long-running targets), but these changes reduced relocation overhead significantly.
-
-## 23. Debugging Methodology and Regression Strategy
-
-This project required continuous regression testing because correctness is global, not local.
-
-Effective tools were:
-
-- `strace` for syscall-level startup behavior
-- `valgrind` for initialization and ABI consistency checks
-- `flamegraph` and extracted titles for hotspot inspection
-- `qemu-aarch64` + aarch64 rootfs for cross-arch runtime tests
-
-Regression tests were repeatedly run on representative binaries such as:
-
-- `/bin/ls`, `/bin/pwd`, `/bin/id`
-- `/usr/bin/fish` (interactive stress case)
-- custom glibc and musl test binaries
-- aarch64 binaries under qemu user mode
-
-## 24. Known Limitations
-
-Current known limitations include:
-
-- `/usr/bin/fish` interactive mode still has failure behavior in some runtime contexts (notably interactive PTY paths), while non-interactive piped mode can work.
-- Valgrind may report `brk segment overflow` warnings even when heap accounting is clean; this is typically a valgrind limitation around brk growth modeling, not necessarily a memory leak.
-- Full parity with system loaders under all glibc internals is still an ongoing target.
-
-These limitations are documented so users can distinguish correctness issues from tool-specific artifacts.
-
-## 25. Why This Was Hard in Practice
-
-The hardest part was not any single feature. The hard part was enforcing global ordering constraints across subsystems that were each individually "almost correct".
-
-Typical failure pattern:
-
-- relocation looked correct in isolation
-- TLS looked correct in isolation
-- constructor order looked correct in isolation
-- process still crashed because one startup-global pointer was initialized one phase too late
-
-`rustld` matured by eliminating these ordering races and state mismatches one by one, with regression testing after each critical change.
-
-## 26. Build and Test Matrix Summary
-
-The implemented matrix today is:
-
-- static ELF: supported
-- dynamic ELF (glibc): supported for broad command workloads
-- dynamic ELF (musl): supported with interpreter-aware handling
-- x86_64: native support
-- aarch64: support via cross-build and qemu user-mode validation
-- Rust API: first-class
-- C API: first-class (`include/rustld.h` + `src/c_api.rs`)
-
-For flow-level diagrams, see `docs/graph.md`.
-For lower-level subsystem detail, see `docs/TECHNICAL_EXPLANATION.md`.
-
-## 27. Representative End-to-End Call Chain
-
-A typical dynamic run using Rust API looks like this:
+Immediate relocation is not always safe. `rustld` queues IFUNC/IRELATIVE operations and copy relocations, then applies them after the primary relocation pass. The resulting order minimizes resolver execution against partially initialized global state.
 
 ```rust
-let loader = ElfLoader::new();
-unsafe {
-    loader.execute_from_bytes(
-        elf_bytes,
-        vec!["/bin/ls".to_string(), "-la".to_string()],
-        None, // inherit env
-        None, // inherit auxv
-        false,
-    );
+relocation::apply_copy_relocations(&copies);
+relocation::apply_irelative_relocations(&ifuncs);
+```
+
+This ordering was one of the highest-impact correctness changes in dynamic startup stability.
+
+## 15. Stub-First Binding for Runtime-Linker Symbols
+
+Some symbols must bind to loader-provided behavior before external search paths are considered. This applies to runtime-linker and dlfcn-related names such as `_dl_*`, `__tunable_*`, and `__tls_get_addr`. Both architecture relocation engines include this policy so startup and runtime symbol requests are directed to the active loader’s compatibility layer when needed.
+
+This decision avoids accidental binding to incompatible external implementations during phases where loader-owned metadata is authoritative.
+
+## 16. TLS Layout as First-Class State
+
+TLS handling begins with `prepare_tls_layout`. The loader assigns module IDs, computes aligned block offsets, reserves runtime static TLS space, and computes TP-relative offsets. It also reserves a small rseq-safe region below TP, based on observed glibc expectations in target environments.
+
+The computed `TlsLayout` is then consumed by `install_tls` and runtime extension paths. By making layout explicit and persistent, the implementation avoids ad hoc TLS calculations at relocation time.
+
+## 17. Initial TLS Installation
+
+`install_tls` allocates TLS backing memory, copies module initialization images, zero-fills residual bytes, constructs TCB, allocates DTV with header slot, and initializes module pointers. Guard values are seeded from random input when available.
+
+```rust
+let module_slots = layout.module_count + 1;
+let dtv_len = (module_slots + DTV_SURPLUS_SLOTS).max(module_slots);
+let dtv_alloc_entries = dtv_len + 1;
+```
+
+Thread-pointer publication is architecture-specific. On x86_64, additional glibc-sensitive fields are initialized to avoid failures in fast paths that assume pre-populated pthread metadata.
+
+## 18. Runtime TLS Module Registration
+
+`register_runtime_tls_modules` extends TLS state after startup when new objects are loaded. It computes new module IDs, attempts static reserved placement, falls back to dynamic block allocation when static space is exhausted, and rebuilds DTV state as needed.
+
+The function also propagates updates to tracked thread TCBs. This propagation is crucial, because existing threads may perform direct TP-relative accesses that become invalid if runtime TLS state is not synchronized process-wide.
+
+## 19. TLSDESC and `__tls_get_addr` Integration
+
+TLS relocations such as `DTPMOD`, `DTPOFF`, `TPOFF`, and `TLSDESC` require coordination between relocation engines and TLS runtime state. The loader resolves module IDs and offsets from linker object metadata and writes architecture-specific descriptor structures for runtime resolution.
+
+`__tls_get_addr` support in `ld_stubs` and architecture helper addresses (`tlsdesc_return_addr`, resolver trampolines) complete the runtime path so dynamically loaded TLS modules are addressable from generated code.
+
+## 20. Runtime-Linker Compatibility Region
+
+`DynamicLinker::init_rtld_stubs` builds a synthetic compatibility region for glibc-facing startup and dlfcn behavior. It allocates backing storage for `_rtld_global`, `_rtld_global_ro`, link-map structures, and standalone globals. It also snapshots auxv and initializes guard-related fields.
+
+```rust
+struct RtldStubs {
+    rtld_global: *mut u8,
+    rtld_global_ro: *mut u8,
+    link_map: *mut u8,
+    libc_enable_secure: *mut u32,
+    libc_stack_end: *mut *const u8,
+    dl_argv: *mut *const *const u8,
+    rseq_offset: *mut isize,
+    rseq_size: *mut u32,
+    rseq_flags: *mut u32,
+    pointer_chk_guard: *mut usize,
+    pointer_chk_guard_local: *mut usize,
+    stack_chk_guard: *mut usize,
+    auxv: *const AuxiliaryVectorItem,
 }
 ```
 
-Internally, this expands to:
+The allocated layout is intentionally generous and zero-initialized because glibc may access fields beyond the minimal subset expected by simplified models.
 
-- parse argv and optional overrides
-- derive runtime metadata from auxv
-- load target and dependencies
-- relocate all objects with deferred resolver/copy phases
-- build/install TLS and update thread pointer
-- run constructors in dependency-safe order
-- rebuild startup frame
-- jump to target entry
+## 21. Valgrind-Aware rseq Metadata
 
-## 28. Research Takeaways
+Instrumentation can invalidate assumptions that hold in native startup. `rustld` therefore carries valgrind-aware behavior for rseq metadata. When running under valgrind, rseq fields are disabled in stubs to avoid unsupported registration behavior. Under native x86_64 execution, rseq defaults follow expected TP-relative conventions.
 
-Three lessons stood out during implementation:
+This policy reduced false-negative startup failures under instrumentation while preserving native behavior.
 
-1. Loader engineering is mostly about state coherence across phases, not about one "big" algorithm.
-2. TLS is where many loaders fail once you move beyond trivial binaries.
-3. Architecture separation (`src/arch/*`) is critical; without it, correctness changes become unmanageable.
+## 22. Constructor Ordering and Initialization Graph
 
-## 29. Conclusion
+Constructors are invoked in dependency-aware order rather than insertion order. The loader computes an initialization sequence and executes `DT_INIT`/`DT_INIT_ARRAY` callbacks once relocation and TLS state are settled. Runtime loads through `dlopen_runtime` reuse the same principle, rooted at the requested subtree.
 
-`rustld` is now a practical user-space loader with real binary coverage, architecture split, glibc/musl handling, and embedding APIs.
+This sequencing avoids initialization code observing partially relocated or partially registered TLS state.
 
-The work was not linear. It involved repeated deep debugging across startup ABI, symbol resolution, TLS layout, runtime linker contract emulation, and architecture-specific relocation behavior.
+## 23. Runtime `dlopen` Extension Path
 
-The current codebase is not a toy linker. It is a runtime system that reconstructs enough of the Linux process startup contract to execute real software from user space, while remaining programmatically controllable from Rust and C.
+`dlopen_runtime` executes a scoped extension pipeline for newly loaded objects. It resolves and loads new dependencies, rebuilds scopes, registers runtime TLS modules for the new object slice, relocates new objects, applies deferred relocation queues, finalizes TLS images, and runs constructors in dependency order.
+
+The separation from initial startup is intentional: runtime graph extension occurs with active threads and existing global state, so extension semantics differ from initial process bootstrap semantics.
+
+## 24. C ABI Integration
+
+The C interface in `src/c_api.rs` wraps loader behavior behind explicit status codes and pointer-based inputs. It supports preparation and direct execution variants, plus entry overrides.
+
+```rust
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rustld_elfloader_execute_from_bytes_with_entry(
+    elf_bytes: *const u8,
+    elf_len: usize,
+    argc: usize,
+    argv: *const *const c_char,
+    entry_symbol: *const c_char,
+    entry_address: usize,
+    entry_address_is_set: i32,
+    envp: *const *const c_char,
+    auxv: *const RustLdAuxvItem,
+    auxv_len: usize,
+    verbose: i32,
+    indirect_syscalls: i32,
+) -> i32
+```
+
+The wrapper parses argv and auxv into Rust-owned representations, preserves override semantics, and catches panics so unwind does not cross FFI boundaries.
+
+## 25. Cross-Architecture Implementation Notes
+
+The architecture split allowed each backend to mature independently. x86_64 includes extensive relocation handling and startup compatibility tuning. aarch64 implements dedicated relocation and startup behavior under the same orchestration model and supports dynamic execution workflows validated through qemu user-mode testing.
+
+Because shared orchestration is architecture-neutral, improvements in stack building, scope ordering, and runtime loading propagate across targets, while architecture-local ABI and relocation changes remain isolated.
+
+## 26. Performance Engineering Process
+
+Optimization work followed a strict measure-change-validate loop. Profiling first identified hot frames, usually in symbol lookup and relocation loops. Candidate changes were then applied in narrow scope and validated for both correctness and performance.
+
+Examples of accepted improvements include keyed lookup caches, precomputed exportability masks, prebuilt requester scopes, and byte-level symbol-name operations. These changes were chosen because they reduced startup cost without widening correctness risk.
+
+## 27. Regression Methodology
+
+The regression suite intentionally mixes simple and complex workloads. Utility binaries such as `ls`, `pwd`, and `id` catch startup regressions quickly. Heavier binaries with broader dependency surfaces stress relocation and constructor ordering. Interactive workloads expose runtime behavior not visible in one-shot executions. Cross-architecture runs under qemu validate backend-specific behavior and rootfs sensitivity.
+
+Each critical loader change was followed by rerunning this suite. This practice prevented local fixes from silently regressing unrelated subsystems.
+
+## 28. Known Limits and Open Issues
+
+Interactive `/usr/bin/fish` remains an explicit known limitation in certain PTY contexts, despite successful non-interactive behavior in equivalent environments. This indicates remaining runtime compatibility work in paths that are not exercised by simpler binaries.
+
+Valgrind can emit `brk segment overflow` warnings with otherwise clean heap summaries. These warnings are tracked as tooling-model artifacts unless accompanied by independent evidence of corruption or leak.
+
+Compatibility parity with all glibc internal paths remains a moving target, especially under unusual constructor and runtime loader interaction patterns.
+
+## 29. Safety Model and `unsafe` Boundaries
+
+A loader necessarily uses `unsafe` for raw memory, ABI crossings, relocation writes, and thread-pointer manipulation. The strategy in `rustld` is to keep unsafe usage concentrated around explicit contract boundaries and avoid broad unsafe regions in orchestration logic.
+
+This approach improves reviewability and fault localization. Most policy code remains in ordinary Rust, while low-level operations remain in dedicated blocks or helper functions tied to specific ABI assumptions.
+
+## 30. Threats to Validity
+
+Evaluation results can be influenced by environment differences. Distribution-specific library layouts, host kernel behavior, instrumentation semantics, and qemu implementation details all affect observed outcomes. Performance comparisons against host loaders are indicative but not always directly comparable because `rustld` may execute additional compatibility work or different policy branches.
+
+The project addresses these threats by reproducing issues across multiple tools, separating instrumentation artifacts from native regressions, and keeping architecture/environment context attached to test outcomes.
+
+## 31. Future Work
+
+Future work includes deeper interactive-shell compatibility, continued aarch64 hardening on complex dynamic workloads, and further startup-performance improvements in relocation-heavy paths. Another active direction is narrowing unsafe scope further without sacrificing readability or throughput.
+
+Longer-term work includes broader test automation and additional formalization of compatibility contracts for runtime-linker-facing state.
+
+## 32. Conclusion
+
+`rustld` has evolved from a bootstrap experiment into a practical user-space loader runtime. It reconstructs startup state, loads and relocates dependency graphs, manages TLS for startup and runtime extension, provides active runtime-linker compatibility surfaces, and exposes controlled execution interfaces for both Rust and C consumers across `x86_64` and `aarch64`.
+
+The key implementation result is methodological rather than cosmetic: reliable loader behavior emerges when ordering constraints are treated as first-class correctness conditions. Mapping, auxv reconstruction, graph loading, relocation, TLS, constructor execution, and runtime-linker state publication must converge in a strict sequence. Enforcing that sequence is what enabled `rustld` to move from prototype behavior to sustained execution of real binaries.
+
+For companion documents, see `docs/TECHNICAL_EXPLANATION.md` for lower-level subsystem details and `docs/graph.md` for full flow visualization.
+
+## Appendix A: Annotated `/bin/ls` Execution Timeline
+
+A useful way to reason about loader correctness is to walk one representative binary through the exact phase transitions. The following timeline summarizes what happens for a typical glibc-linked `/bin/ls` launch.
+
+The first transition is image ingestion. `ElfLoader` validates argv, derives effective environment and auxv sources, extracts runtime metadata such as page size and hwcap values, and then calls into `execute_elf_from_bytes` and `launch_target_with_source`.
+
+The second transition is memory realization. `load_target_image_from_bytes` parses ELF headers, computes PT_LOAD bounds, maps memory, copies file bytes, and zero-fills non-file tails. At this point the executable image exists as mapped memory but is not yet runnable because dynamic dependencies and startup metadata are incomplete.
+
+The third transition is startup-context reconstruction. Auxv is copied and rewritten, environment is normalized, random-backed auxv pointers are stabilized, and a new stack image is assembled with argv/envp/auxv records in target ABI order. This phase ends with `new_stack`, `new_argv`, and `new_auxv` pointers ready.
+
+The fourth transition is dynamic graph construction. The executable becomes object zero in `DynamicLinker`. Dependencies are loaded recursively through `DT_NEEDED`. Aliases are registered. Lookup scopes are rebuilt to produce stable requester-specific symbol search order.
+
+The fifth transition is relocation convergence. Each object is relocated in sequence using architecture-specific relocation handlers. Writable ranges are prepared with `mprotect` where required. Primary relocations are applied, copy relocations are queued and then applied, IFUNC/IRELATIVE entries are queued and finally resolved.
+
+The sixth transition is TLS realization. `prepare_tls_layout` computes module IDs and offsets. `install_tls` initializes initial thread TCB and DTV state. Startup symbol pointer writes then bind libc-facing globals to the newly established runtime state.
+
+The seventh transition is constructor phase. Dependency constructors run in dependency-consistent order, excluding explicit policy exceptions. This ensures startup code sees coherent relocation and TLS state.
+
+The final transition is entry transfer. The loader resolves final entry selection (default or override), publishes active-linker state, and jumps into target code with the rebuilt startup stack.
+
+## Appendix B: Relocation Semantics and Formula Mapping
+
+Relocation code in `rustld` maps architecture relocation opcodes to explicit write formulas. The implementation intentionally keeps formula application close to the write site rather than hiding it behind opaque abstractions, because debugging relocation failures requires direct traceability from opcode to computed value.
+
+For x86_64, core classes include absolute writes (`R_X86_64_64`), GOT/PLT entries (`R_X86_64_GLOB_DAT`, `R_X86_64_JUMP_SLOT`), base-relative writes (`R_X86_64_RELATIVE`), copy relocations (`R_X86_64_COPY`), IFUNC/IRELATIVE resolver entries, and TLS classes (`R_X86_64_DTPMOD64`, `R_X86_64_DTPOFF64`, `R_X86_64_TPOFF64`, `R_X86_64_TLSDESC`).
+
+For aarch64, equivalent classes appear as `R_AARCH64_ABS64`, `R_AARCH64_GLOB_DAT`, `R_AARCH64_JUMP_SLOT`, `R_AARCH64_RELATIVE`, `R_AARCH64_COPY`, `R_AARCH64_IRELATIVE`, plus TLS variants (`R_AARCH64_TLS_DTPMOD64`, `R_AARCH64_TLS_DTPREL64`, `R_AARCH64_TLS_TPREL64`, `R_AARCH64_TLSDESC`).
+
+The relocation engine also applies RELR packed-relative relocation streams. RELR entries encode either direct relocation addresses or bitmap expansions over adjacent machine-word slots. The implementation computes both relocation application and relocation-range bounds from the same stream logic so `mprotect` windows remain precise.
+
+## Appendix C: TLS Memory Model and Thread Synchronization
+
+The TLS subsystem in `rustld` models thread-local state explicitly and persistently. The system stores global TLS runtime state in `TlsState`, including TCB and DTV pointers, DTV capacity, runtime static cursor, and module templates. This state exists because runtime module insertion is not optional in practical dynamic loading scenarios.
+
+`prepare_tls_layout` computes startup TLS offsets for all objects with TLS segments. Layout includes rseq-safe reservation and alignment handling. `install_tls` realizes this layout for the initial thread and establishes thread pointer state.
+
+Runtime extension through `register_runtime_tls_modules` performs three logically separate tasks. It allocates module IDs and placement decisions for newly loaded TLS segments. It grows DTV capacity while preserving prior entries. It propagates static-module updates to tracked thread contexts so existing threads keep valid TP-relative addressing semantics.
+
+A lock-protected tracked-thread registry supports this propagation. The design trades some complexity for correctness because runtime TLS updates without thread synchronization would produce hard-to-reproduce crashes under multithreaded paths.
+
+## Appendix D: Runtime dlfcn Surface
+
+`ld_stubs` exports dlfcn-like entrypoints and helper symbols that route into the active `DynamicLinker` instance. This allows runtime symbol queries and runtime loading to operate over the same in-memory object graph used during startup.
+
+`dlopen_runtime` extends the graph from the current process state, not from an empty loader state. It loads missing dependencies, rebuilds scopes, registers TLS modules for the new slice, relocates only those objects, applies deferred queues, finalizes TLS images, and runs constructors in rooted dependency order.
+
+Because this path is incremental and stateful, correctness depends on preserving prior graph invariants while integrating new nodes. The implementation therefore reuses startup-grade relocation and constructor rules rather than introducing a separate simplified runtime loader path.
+
+## Appendix E: Practical Profiling and Debugging Loop
+
+The maintenance workflow for `rustld` repeatedly alternates between profiling and correctness validation. Profiling identifies hotspots and informs targeted code changes. Correctness validation confirms that changes did not alter startup invariants.
+
+Typical profiling commands include flamegraph collection over representative binaries and syscall tracing over startup-heavy workloads. Typical correctness checks include baseline utility execution, dynamic-heavy binaries, architecture-emulated runs, and instrumentation-assisted diagnostics.
+
+The project experience is that performance changes are only accepted when they survive this full loop. Fast-but-unstable changes regress quickly in loader code, while slower but semantically robust changes provide a better base for subsequent optimization.
+
+<details>
+<summary>Mermaid Graph representing rustld implementation</summary>
+
+```mermaid
+flowchart TD
+
+    A0([user invokes rustld with target]) --> A1[examples rustld main]
+    A1 --> A2[read target ELF bytes]
+    A2 --> A3[ElfLoader execute_from_bytes]
+    A3 --> A4[ElfLoader prepare_from_bytes_with_entry]
+
+    subgraph RL [runtime_loader path]
+      A4 --> B1[validate args and entry override]
+      B1 --> B2[argv strings to C strings]
+      B2 --> B3[build argv pointer array with NULL]
+      A4 --> B4[resolve env option]
+      A4 --> B5[resolve auxv option]
+      B5 --> B6[derive runtime metadata from auxv]
+      B6 --> B7[set page size]
+      B7 --> B8[set direct or indirect syscall mode]
+      B3 --> B9[start execute_elf_from_bytes]
+      B4 --> B9
+      B5 --> B9
+      B6 --> B9
+    end
+
+    subgraph ST [start launch pipeline]
+      B9 --> C1[load_target_image_from_bytes]
+      C1 --> C2[parse ELF and program headers]
+      C2 --> C3[map PT_LOAD segments]
+      C3 --> C4[collect LoadedImage metadata]
+      C4 --> C5[normalize auxv and rewrite key tags]
+      C5 --> C6[collect env and stabilize auxv string pointers]
+      C6 --> C7[build target startup stack image]
+      C7 --> C8[create executable SharedObject]
+    end
+
+    C8 --> D0{has dynamic section}
+
+    subgraph STATIC [static binary path]
+      D0 -- no --> S1[skip dynamic linker graph]
+      S1 --> S2[select entry]
+      S2 --> S3[JumpInfo entry and stack]
+      S3 --> S4[arch jump_to_entry]
+      S4 --> S5([target static runtime starts])
+    end
+
+    subgraph DYN [dynamic classify and load]
+      D0 -- yes --> D1[inspect PT_INTERP and DT_NEEDED]
+      D1 --> D2{target flavor}
+
+      D2 -- glibc --> D3[DynamicLinker new]
+      D2 -- musl --> D4{chainload policy}
+      D2 -- other --> D5[generic fallback path]
+
+      D4 -- chainload attempt --> D6[try interpreter execve]
+      D6 --> D7{execve success}
+      D7 -- yes --> Z0([control leaves rustld process])
+      D7 -- no --> D8[in process musl fallback]
+      D4 -- skip --> D8
+
+      D3 --> D9[init glibc rtld stubs]
+      D8 --> D10[musl path without glibc rtld stub init]
+      D5 --> D10
+
+      D9 --> D11[add executable object]
+      D10 --> D11
+      D11 --> D12[walk DT_NEEDED recursively]
+      D12 --> D13[resolve library path]
+      D13 --> D14[map dependency object]
+      D14 --> D15[insert object and recurse]
+      D15 --> D16{more dependencies}
+      D16 -- yes --> D13
+      D16 -- no --> D17[rebuild lookup scopes]
+    end
+
+    subgraph TLS_LAYOUT [tls prepare layout before relocation]
+      D17 --> T1[prepare_tls_layout]
+      T1 --> T2[assign module_id for PT_TLS objects]
+      T2 --> T3[compute max alignment]
+      T3 --> T4[place dependency TLS blocks]
+      T4 --> T5[place main executable TLS block]
+      T5 --> T6[compute block_offset and TP relative offset]
+      T6 --> T7[reserve runtime static window]
+      T7 --> T8[reserve rseq safety bytes below TP]
+      T8 --> T9[publish TLS_LAYOUT]
+    end
+
+    subgraph REL [relocation engine path]
+      T9 --> R0{runtime arch}
+      R0 -- x86_64 --> R1[x86 relocate_with_linker]
+      R0 -- aarch64 --> R2[aarch64 relocate_with_linker]
+
+      R1 --> R3[parse RELA JMPREL RELR]
+      R2 --> R3
+      R3 --> R4[apply RELR packed relatives]
+      R4 --> R5[iterate relocation entries]
+
+      R5 --> R6{symbol lookup needed}
+      R6 -- no --> R7[direct write relocation value]
+      R6 -- yes --> R8[lookup_symbol_any with SymbolLookupCache]
+      R8 --> R9[DynamicLinker scope lookup]
+      R9 --> R10[SharedObject export lookup hash paths]
+      R10 --> R11[write resolved value]
+
+      R8 --> RTLS0{tls relocation class}
+      RTLS0 -- x86 DTPMOD DTPOFF TPOFF TLSGD TLSLD GOTTPOFF TLSDESC --> RTLS1[write TLS reloc data for x86]
+      RTLS0 -- aarch64 DTPMOD DTPREL TPREL TLSDESC --> RTLS2[write TLS reloc data for aarch64]
+
+      RTLS1 --> RTLSD0{TLSDESC mode}
+      RTLS2 --> RTLSD0
+      RTLSD0 -- runtime lookup needed --> RTLSD1[descriptor fn points to arch tlsdesc_resolver]
+      RTLSD1 --> RTLSD2[descriptor arg points to TlsIndex module and offset]
+      RTLSD0 -- direct TP relative --> RTLSD3[descriptor fn points to arch tlsdesc_return]
+      RTLSD3 --> RTLSD4[descriptor arg stores direct TP relative offset]
+
+      R7 --> R12{special class}
+      R11 --> R12
+      R12 -- STT_GNU_IFUNC --> R13[queue IrelativeReloc from symbol resolver]
+      R12 -- IRELATIVE reloc type --> R14[queue IrelativeReloc from reloc addend]
+      R12 -- COPY reloc type --> R15[queue CopyReloc source destination size]
+      R12 -- normal --> R16[next relocation]
+      R13 --> R16
+      R14 --> R16
+      R15 --> R16
+      R16 --> R17{more relocations}
+      R17 -- yes --> R5
+      R17 -- no --> R18[all objects scanned]
+    end
+
+    subgraph POST [post relocation order]
+      R18 --> P1[apply_copy_relocations]
+      P1 --> P2{musl target}
+      P2 -- no --> P3[install_tls initial thread]
+      P3 --> P4[allocate TLS region and copy PT_TLS images]
+      P4 --> P5[build TCB and DTV]
+      P5 --> P6[set thread pointer register]
+      P6 --> P7[stamp thread tid and register tracked thread]
+      P7 --> P8[seed startup glibc symbol pointers]
+      P8 --> P9[apply_irelative_relocations]
+
+      P2 -- yes --> P9
+
+      P9 --> P10[for each queued resolver call resolver]
+      P10 --> P11[write resolver return value into relocation slot]
+      P11 --> P12[resolve requested entry override]
+      P12 --> P13{glibc startup path}
+      P13 -- yes --> P14[update rtld stack end and call libc early init]
+      P14 --> P15[patch libc copy thresholds]
+      P15 --> P16[run constructors dependency order]
+      P13 -- no --> P16
+      P16 --> P17[JumpInfo entry and stack]
+      P17 --> P18[arch jump_to_entry]
+      P18 --> P19([target startup and main execute])
+    end
+
+    subgraph TLS_ADDR [runtime __tls_get_addr path]
+      P19 -. tls access .-> TA1[__tls_get_addr in ld_stubs]
+      TA1 --> TA2[tls resolve_tls_address module and offset]
+      TA2 --> TA3[read current tcb and dtv]
+      TA3 --> TA4{slot exists and module base present}
+      TA4 -- yes --> TA5[return module_base plus offset]
+      TA4 -- no --> TA6[grow DTV if needed]
+      TA6 --> TA7[allocate dynamic TLS block if needed]
+      TA7 --> TA8[store module base in dtv]
+      TA8 --> TA5
+    end
+
+    subgraph DLOPEN [runtime dlopen extension path]
+      P19 -. runtime load .-> L1[ld stubs dlopen dlsym path]
+      L1 --> L2[DynamicLinker dlopen_runtime]
+      L2 --> L3[load and map new dependency subtree]
+      L3 --> L4[rebuild lookup scopes]
+      L4 --> L5[register_runtime_tls_modules]
+      L5 --> L6[assign module_id for new modules]
+      L6 --> L7[fit runtime static window or mark dynamic]
+      L7 --> L8[allocate and swap expanded DTV]
+      L8 --> L9[propagate TLS updates to tracked threads]
+      L9 --> L10[relocate new objects]
+      L10 --> L11[apply copy then irelative]
+      L11 --> L12[finalize_runtime_tls_images]
+      L12 --> L13[run init arrays for loaded subtree]
+    end
+```
+</details>

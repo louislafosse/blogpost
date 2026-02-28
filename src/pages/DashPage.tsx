@@ -271,6 +271,9 @@ export const Dash: React.FC = () => {
         </Box>
 
         {/* About panel — fixed to viewport so scrolling the journal behind it is impossible */}
+        {(() => {
+          const a = getAuthor('louislafosse');
+          return (
         <Box sx={{
           position: "fixed", top: "50%", left: "50%",
           transform: viewAbout ? "translate(-50%,-50%)" : "translate(-50%,-44%)",
@@ -285,39 +288,73 @@ export const Dash: React.FC = () => {
           borderRadius: "8px", border: `1px solid ${border}`,
           boxShadow: cardShadow, textAlign: "left",
         }}>
-          <Typography sx={{
-            fontFamily: "'Cormorant Garamond', serif", fontSize: "3rem", fontWeight: 600,
-            color: ink, mb: "25px", transition: "color 1.2s ease",
-            borderBottom: `1px solid ${border}`, pb: "15px", display: "inline-block",
-          }}>
-            The Wanderer
-          </Typography>
-          {[
-            "I explore the esoteric boundaries of memory safety, cryptography, and digital philosophy. What is broken can be understood; what is understood can be mastered.",
-            "In the quiet spaces between allocated blocks, secrets lie dormant. My work is to illuminate these forgotten regions, mapping the topography of vulnerabilities before they are exploited.",
-          ].map((txt, i) => (
-            <Typography key={i} sx={{
-              fontFamily: "'Cormorant Garamond', serif", fontSize: "1.25rem",
-              color: inkSec, lineHeight: 1.8, mb: "20px", transition: "color 1.2s ease",
-            }}>{txt}</Typography>
-          ))}
-          <Box sx={{ mt: "30px", display: "flex", gap: "20px", alignItems: "center" }}>
-            <Box sx={{
-              fontFamily: "'Fira Code', monospace", fontSize: "0.85rem",
-              background: codeBg, padding: "8px 15px", borderRadius: "4px",
-              border: `1px solid ${border}`, color: ink,
-            }}>
-              PGP: 0xDEADBEEFCAFEBABE
-            </Box>
-            <Box component="a" href="mailto:wanderer@seaofnulls.local" sx={{
-              fontFamily: "'Fira Code', monospace", color: ink, textDecoration: "none",
-              fontSize: "0.85rem", borderBottom: `1px solid ${ink}`, pb: "2px",
-              transition: "opacity 0.3s ease", "&:hover": { opacity: 0.7 },
-            }}>
-              CONTACT
+          {/* Avatar + name row */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: "18px", mb: "25px", borderBottom: `1px solid ${border}`, pb: "20px" }}>
+            {a?.avatar && (
+              <Box component="img" src={a.avatar} alt={a?.name}
+                sx={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", border: `2px solid ${border}`, flexShrink: 0 }} />
+            )}
+            <Box>
+              <Typography sx={{
+                fontFamily: "'Cormorant Garamond', serif", fontSize: "2.2rem", fontWeight: 600,
+                color: ink, lineHeight: 1.1, transition: "color 1.2s ease",
+              }}>
+                {a?.name ?? 'Unknown'}
+              </Typography>
+              {a?.handle && (
+                <Typography sx={{
+                  fontFamily: "'Fira Code', monospace", fontSize: "0.8rem",
+                  color: inkSec, letterSpacing: "0.08em", transition: "color 1.2s ease",
+                }}>
+                  @{a.handle}
+                </Typography>
+              )}
             </Box>
           </Box>
+
+          {/* Bio */}
+          {a?.bio && (
+            <Typography sx={{
+              fontFamily: "'Cormorant Garamond', serif", fontSize: "1.25rem",
+              color: inkSec, lineHeight: 1.8, mb: "28px", transition: "color 1.2s ease",
+            }}>{a.bio}</Typography>
+          )}
+
+          {/* Links row */}
+          <Box sx={{ display: "flex", gap: "20px", alignItems: "center", flexWrap: "wrap" }}>
+            {a?.pgp && (
+              <Box sx={{
+                fontFamily: "'Fira Code', monospace", fontSize: "0.85rem",
+                background: codeBg, padding: "8px 15px", borderRadius: "4px",
+                border: `1px solid ${border}`, color: ink,
+              }}>
+                PGP: {a.pgp}
+              </Box>
+            )}
+            {a?.email && (
+              <Box component="a" href={`mailto:${a.email}`} target="_blank" rel="noreferrer" sx={{
+                fontFamily: "'Fira Code', monospace", color: ink, textDecoration: "none",
+                fontSize: "0.85rem", borderBottom: `1px solid ${ink}`, pb: "2px",
+                transition: "opacity 0.3s ease", "&:hover": { opacity: 0.7 },
+              }}>
+                CONTACT
+              </Box>
+            )}
+            {a?.links?.map((link: { label: string; url: string; handle?: string }) => (
+              <Box key={link.label} component="a" href={link.url} target="_blank" rel="noreferrer" sx={{
+                fontFamily: "'Fira Code', monospace", color: inkSec, textDecoration: "none",
+                fontSize: "0.8rem", letterSpacing: "0.08em",
+                textTransform: link.handle ? "none" : "uppercase",
+                transition: "opacity 0.3s ease, color 1.2s ease",
+                "&:hover": { opacity: 0.6 },
+              }}>
+                {link.handle ?? link.label}
+              </Box>
+            ))}
+          </Box>
         </Box>
+          );
+        })()}
       </Box>
 
       {/* Journal entries */}
