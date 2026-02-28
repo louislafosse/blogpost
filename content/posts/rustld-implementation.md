@@ -2,6 +2,8 @@
 
 This report describes the design and implementation of `rustld`, a user-space ELF loader written in Rust that executes Linux binaries by reconstructing the runtime contract normally assembled by the kernel and system dynamic linker. The implementation is intended for real binaries rather than reduced demonstrations. It includes executable and shared-object mapping, startup stack and auxv reconstruction, recursive dependency loading, architecture-specific relocation engines, static and runtime TLS management, constructor sequencing, and final control transfer to the target entrypoint.
 
+**Repository:** [louislafosse/rustld](https://github.com/louislafosse/rustld)
+
 The system supports `x86_64` and `aarch64`, and handles both glibc- and musl-oriented targets through explicit startup policy branching. It is available both as a direct executable interface and as an embeddable runtime via Rust and C APIs. This document presents the full technical story from architecture decisions to subsystem mechanics, with emphasis on ordering constraints, failure modes encountered during implementation, and the reasoning that shaped the current codebase.
 
 ## 1. Introduction
@@ -348,6 +350,8 @@ Typical profiling commands include flamegraph collection over representative bin
 
 The project experience is that performance changes are only accepted when they survive this full loop. Fast-but-unstable changes regress quickly in loader code, while slower but semantically robust changes provide a better base for subsequent optimization.
 
+
+
 <details>
 <summary>Mermaid Graph representing rustld implementation</summary>
 
@@ -491,7 +495,7 @@ flowchart TD
 
       P2 -- yes --> P9
 
-      P9 --> P10[for each queued resolver call resolver]
+      P9 --> P10[invoke each queued IRELATIVE resolver]
       P10 --> P11[write resolver return value into relocation slot]
       P11 --> P12[resolve requested entry override]
       P12 --> P13{glibc startup path}
