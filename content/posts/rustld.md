@@ -477,7 +477,7 @@ flowchart TD
       T3 --> T4[place dependency TLS blocks]
       T4 --> T5[place main executable TLS block]
       T5 --> T6[compute block_offset and TP relative offset]
-      T6 --> T7[reserve runtime static window]
+      T6 --> T7[reserve runtime static window for dlopen IE TLS]
       T7 --> T8[reserve rseq safety bytes below TP]
       T8 --> T9[publish TLS_LAYOUT]
     end
@@ -569,8 +569,11 @@ flowchart TD
       P19 -. tls access .-> TA1[__tls_get_addr in ld_stubs]
       TA1 --> TA2[tls resolve_tls_address module and offset]
       TA2 --> TA3[read current tcb and dtv]
-      TA3 --> TA4{slot exists and module base present}
-      TA4 -- yes --> TA5[return module_base plus offset]
+      TA3 --> TA3A{module is static}
+      TA3A -- yes --> TA3B[compute base from TP plus layout and refresh DTV slot]
+      TA3B --> TA5[return module_base plus offset]
+      TA3A -- no --> TA4{slot exists and module base present}
+      TA4 -- yes --> TA5
       TA4 -- no --> TA6[grow DTV if needed]
       TA6 --> TA7[allocate dynamic TLS block if needed]
       TA7 --> TA8[store module base in dtv]
