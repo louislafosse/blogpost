@@ -398,7 +398,7 @@ flowchart TD
       PM2X --> PM3[seed auxv tls hwcap self slots]
       PM2A --> PM3
       PM3 --> PM4{stage helper funcs decoded}
-      PM4 -- yes --> PM5[call stage2b helper pair]
+      PM4 -- yes --> PM5["invoke stage2b helper pair"]
       PM4 -- no --> PM6[skip helper call]
       PM5 --> PM7[seed musl internal queue slot fallback]
       PM6 --> PM7
