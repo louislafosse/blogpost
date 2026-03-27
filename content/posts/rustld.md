@@ -411,7 +411,7 @@ flowchart TD
       P13 -- yes --> P14[update rtld stack end]
       P14 --> P14A{x86_64 libc layout supported}
       P14A -- yes --> P14B["call __libc_early_init"]
-      P14A -- no --> P14C[call __ctype_init fallback]
+      P14A -- no --> P14C["call __ctype_init fallback"]
       P14B --> P15[patch libc copy thresholds]
       P14C --> P15
       P15 --> P16[run constructors dependency order]
