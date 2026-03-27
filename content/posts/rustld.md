@@ -393,8 +393,8 @@ flowchart TD
 
       P2 -- yes --> PM1[install_tls_musl initial thread]
       PM1 --> PM2{decode stage2b by arch}
-      PM2 -- x86_64 --> PM2X[decode RIP relative refs around __dls2b]
-      PM2 -- aarch64 --> PM2A[decode ADRP ADD LDR STP refs around __dls2b]
+      PM2 -- x86_64 --> PM2X["decode RIP relative refs around __dls2b"]
+      PM2 -- aarch64 --> PM2A["decode ADRP ADD LDR STP refs around __dls2b"]
       PM2X --> PM3[seed auxv tls hwcap self slots]
       PM2A --> PM3
       PM3 --> PM4{stage helper funcs decoded}
@@ -410,7 +410,7 @@ flowchart TD
       P12 --> P13{glibc startup path}
       P13 -- yes --> P14[update rtld stack end]
       P14 --> P14A{x86_64 libc layout supported}
-      P14A -- yes --> P14B[call __libc_early_init]
+      P14A -- yes --> P14B["call __libc_early_init"]
       P14A -- no --> P14C[call __ctype_init fallback]
       P14B --> P15[patch libc copy thresholds]
       P14C --> P15
@@ -421,8 +421,8 @@ flowchart TD
       P18 --> P19([target startup and main execute])
     end
 
-    subgraph TLS_ADDR [runtime __tls_get_addr path]
-      P19 -. tls access .-> TA1[__tls_get_addr in ld_stubs]
+    subgraph TLS_ADDR ["runtime __tls_get_addr path"]
+      P19 -. tls access .-> TA1["__tls_get_addr in ld_stubs"]
       TA1 --> TA2[tls resolve_tls_address module and offset]
       TA2 --> TA3[read current tcb and dtv]
       TA3 --> TA3A{module is static}
